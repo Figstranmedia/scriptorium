@@ -4,13 +4,14 @@ import type { LayoutImageFrame } from '../../lib/threadEngine'
 interface Props {
   frame: LayoutImageFrame
   isSelected: boolean
-  onSelect: () => void
+  onSelect: (addToSelection?: boolean) => void
   onUpdate: (updates: Partial<LayoutImageFrame>) => void
   onDelete: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
   scale: number
 }
 
-export function LayoutImageFrameComp({ frame, isSelected, onSelect, onUpdate, onDelete, scale }: Props) {
+export function LayoutImageFrameComp({ frame, isSelected, onSelect, onUpdate, onDelete, onContextMenu, scale }: Props) {
   const dragStart = useRef({ mx: 0, my: 0, fx: 0, fy: 0 })
   const resizeStart = useRef({ mx: 0, my: 0, fw: 0, fh: 0 })
   const [dragging, setDragging] = useState(false)
@@ -63,14 +64,19 @@ export function LayoutImageFrameComp({ frame, isSelected, onSelect, onUpdate, on
         position: 'absolute',
         left: frame.x, top: frame.y,
         width: frame.width, height: frame.height,
-        border: `1.5px solid ${isSelected ? '#e3703f' : '#cbd5e1'}`,
+        border: (frame.borderWidth || 0) > 0
+          ? `${frame.borderWidth}px solid ${frame.borderColor || '#cbd5e1'}`
+          : `1.5px solid ${isSelected ? '#e3703f' : '#cbd5e1'}`,
         boxSizing: 'border-box',
         background: '#f8f7f4',
         cursor: dragging ? 'grabbing' : 'grab',
         overflow: 'hidden',
-        zIndex: isSelected ? 20 : 10,
+        zIndex: isSelected ? 20 : (frame.zIndex || 10),
+        borderRadius: frame.cornerRadius || 0,
+        opacity: frame.opacity !== undefined ? frame.opacity : 1,
       }}
-      onClick={(e) => { e.stopPropagation(); onSelect() }}
+      onClick={(e) => { e.stopPropagation(); onSelect(e.shiftKey || e.metaKey) }}
+      onContextMenu={(e) => { e.stopPropagation(); onContextMenu?.(e) }}
     >
       {/* Image */}
       {frame.src ? (

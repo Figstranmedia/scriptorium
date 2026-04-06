@@ -23,6 +23,12 @@ export interface Reference {
   accessDate?: string
 }
 
+export interface Guide {
+  id: string
+  axis: 'h' | 'v'
+  position: number  // page pixels
+}
+
 export interface Document {
   id: string
   title: string
@@ -37,6 +43,7 @@ export interface Document {
   layoutPageSize?: string
   layoutMasters?: any[]
   layoutPageAssignments?: Record<number, string>
+  layoutGuides?: Guide[]
   createdAt: number
   updatedAt: number
 }

@@ -21,7 +21,25 @@ export interface LayoutFrame {
   paddingLeft: number
   fontSize: number
   lineHeight: number
-  fontFamily: 'serif' | 'sans' | 'mono'
+  fontFamily: string   // 'serif' | 'sans' | 'mono' or any installed font name
+  // Direct content (when frame is standalone, not threaded)
+  ownContent: string
+  // Paragraph style
+  textAlign: 'left' | 'center' | 'right' | 'justify'
+  fontWeight: 'normal' | 'bold'
+  fontStyle: 'normal' | 'italic'
+  textColor: string
+  letterSpacing: number
+  // Layer
+  zIndex: number
+  locked: boolean
+  // Appearance
+  backgroundColor: string
+  borderColor: string
+  borderWidth: number
+  borderStyle: 'solid' | 'dashed' | 'dotted'
+  cornerRadius: number
+  opacity: number
 }
 
 export interface LayoutImageFrame {
@@ -34,6 +52,12 @@ export interface LayoutImageFrame {
   src: string
   fit: 'fill' | 'fit' | 'crop'
   caption: string
+  zIndex: number
+  locked: boolean
+  opacity: number
+  cornerRadius: number
+  borderColor: string
+  borderWidth: number
 }
 
 export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame
@@ -110,7 +134,7 @@ function fitBlocksInFrame(
     overflow: hidden;
     font-size: ${frame.fontSize}px;
     line-height: ${frame.lineHeight};
-    font-family: ${frame.fontFamily === 'serif' ? 'Lora, Georgia, serif' : frame.fontFamily === 'sans' ? 'Figtree, sans-serif' : 'monospace'};
+    font-family: ${frame.fontFamily === 'serif' ? 'Lora, Georgia, serif' : frame.fontFamily === 'sans' ? 'Figtree, sans-serif' : frame.fontFamily === 'mono' ? 'monospace' : `"${frame.fontFamily}"`};
     column-count: ${frame.columns > 1 ? frame.columns : 'unset'};
     column-gap: ${frame.columnGutter}px;
     word-wrap: break-word;
@@ -219,6 +243,20 @@ export function createDefaultFrame(
     fontSize: 11,
     lineHeight: 1.75,
     fontFamily: 'serif',
+    ownContent: '',
+    textAlign: 'left',
+    fontWeight: 'normal',
+    fontStyle: 'normal',
+    textColor: '#1a1714',
+    letterSpacing: 0,
+    zIndex: 10,
+    locked: false,
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    borderStyle: 'solid',
+    cornerRadius: 0,
+    opacity: 1,
     ...partial,
   }
 }
@@ -237,6 +275,12 @@ export function createDefaultImageFrame(
     src: '',
     fit: 'fit',
     caption: '',
+    zIndex: 10,
+    locked: false,
+    opacity: 1,
+    cornerRadius: 0,
+    borderColor: 'transparent',
+    borderWidth: 0,
   }
 }
 

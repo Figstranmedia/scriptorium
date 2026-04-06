@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('api', {
   // Images
   pickImage: () => ipcRenderer.invoke('image:pick'),
 
+  // PDF Import
+  importPDF: () => ipcRenderer.invoke('pdf:read-file'),
+
   // Ollama
   ollamaListModels: () => ipcRenderer.invoke('ollama:list-models'),
 
@@ -26,4 +29,10 @@ contextBridge.exposeInMainWorld('api', {
   aiSuggest: (text: string, ctx: string) => ipcRenderer.invoke('ai:suggest', text, ctx),
   aiRestructure: (text: string, docType: string) => ipcRenderer.invoke('ai:restructure', text, docType),
   aiReplace: (text: string, instruction: string, ctx: string) => ipcRenderer.invoke('ai:replace', text, instruction, ctx),
+
+  // Fonts
+  listFonts: () => ipcRenderer.invoke('fonts:list'),
+
+  // AI Design
+  aiDesign: (instruction: string, frameProps: object) => ipcRenderer.invoke('ai:design', instruction, frameProps),
 })

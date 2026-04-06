@@ -124,6 +124,30 @@ ipcMain.handle('export:pdf', async (_event, html: string, title: string) => {
   }
 })
 
+// ─── IPC: Fonts ──────────────────────────────────────────────────────────────
+ipcMain.handle('fonts:list', async () => {
+  try {
+    const fontList = await import('font-list')
+    const fonts = await fontList.getFonts({ disableQuoting: true })
+    return fonts.sort()
+  } catch {
+    return []
+  }
+})
+
+// ─── IPC: PDF Import ─────────────────────────────────────────────────────────
+ipcMain.handle('pdf:read-file', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Importar PDF',
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || filePaths.length === 0) return null
+  const buffer = readFileSync(filePaths[0])
+  const name = filePaths[0].split('/').pop()?.replace(/\.pdf$/i, '') || 'Importado'
+  return { data: buffer.toString('base64'), name }
+})
+
 // ─── IPC: Images ─────────────────────────────────────────────────────────────
 ipcMain.handle('image:pick', async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -240,6 +264,39 @@ Selected text to restructure:
     return { result }
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+})
+
+ipcMain.handle('ai:design', async (_event, instruction: string, frameProps: object) => {
+  try {
+    const result = await callAI(`You are a graphic design assistant for a desktop publishing app (like InDesign).
+The user has selected a design frame with these current properties:
+${JSON.stringify(frameProps, null, 2)}
+
+The user wants: "${instruction}"
+
+Respond with ONLY a valid JSON object containing the properties to change.
+Use these exact field names: fontSize, fontFamily, fontWeight (normal/bold), fontStyle (normal/italic),
+textAlign (left/center/right/justify), textColor (hex), backgroundColor (hex or "transparent"),
+borderColor (hex or "transparent"), borderWidth (number), borderStyle (solid/dashed/dotted),
+cornerRadius (number), opacity (0-1), lineHeight (number), letterSpacing (number),
+columns (1-4), paddingTop, paddingRight, paddingBottom, paddingLeft.
+
+Only include fields that should actually change. No explanation, no markdown, ONLY the JSON object.
+
+Examples:
+User: "fondo azul marino, texto blanco, 18pt"
+Response: {"backgroundColor":"#1a365d","textColor":"#ffffff","fontSize":18}
+
+User: "centrar texto, fuente grande para título"
+Response: {"textAlign":"center","fontSize":36,"fontWeight":"bold"}`, 512)
+    // Extract JSON from response
+    const match = result.match(/\{[\s\S]*\}/)
+    if (!match) return { error: 'No se pudo interpretar la respuesta' }
+    const changes = JSON.parse(match[0])
+    return { changes }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Error' }
   }
 })
 

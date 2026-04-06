@@ -25,6 +25,9 @@ declare global {
       aiSuggest: (text: string, ctx: string) => Promise<{ result?: string; error?: string }>
       aiRestructure: (text: string, docType: string) => Promise<{ result?: string; error?: string }>
       aiReplace: (text: string, instruction: string, ctx: string) => Promise<{ result?: string; error?: string }>
+      importPDF: () => Promise<{ data: string; name: string } | null>
+      listFonts: () => Promise<string[]>
+      aiDesign: (instruction: string, frameProps: object) => Promise<{ changes?: Record<string, unknown>; error?: string }>
     }
   }
 }
