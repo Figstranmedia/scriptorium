@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+dist-app/
+build/icon.iconset/
+build/icon.png
+build/icon_src.svg
+.DS_Store
+*.log
+.env
+.env.local

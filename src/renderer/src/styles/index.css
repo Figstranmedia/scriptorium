@@ -1,0 +1,210 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ── Drag region for frameless window ── */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-nodrag {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c8bfad; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #a09080; }
+
+/* ── TipTap editor ── */
+.ProseMirror {
+  outline: none;
+  min-height: 100%;
+  padding: 4rem 6rem;
+  font-family: 'Lora', Georgia, serif;
+  font-size: 16px;
+  line-height: 1.85;
+  color: #2a2520;
+  caret-color: #d4522b;
+}
+
+.ProseMirror p { margin: 0 0 1em 0; }
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #b8ad97;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+.ProseMirror h1 {
+  font-family: 'Figtree', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: #1a1714;
+  margin: 2rem 0 1rem;
+  line-height: 1.2;
+  border-bottom: 2px solid #ede9e1;
+  padding-bottom: 0.5rem;
+}
+.ProseMirror h2 {
+  font-family: 'Figtree', sans-serif;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #2a2520;
+  margin: 1.8rem 0 0.8rem;
+}
+.ProseMirror h3 {
+  font-family: 'Figtree', sans-serif;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #3e3630;
+  margin: 1.4rem 0 0.6rem;
+}
+.ProseMirror h4 {
+  font-family: 'Figtree', sans-serif;
+  font-size: 1rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #5c5043;
+  margin: 1.2rem 0 0.5rem;
+}
+
+.ProseMirror blockquote {
+  border-left: 3px solid #d4522b;
+  margin: 1.5rem 0;
+  padding: 0.5rem 1.5rem;
+  color: #5c5043;
+  font-style: italic;
+}
+
+.ProseMirror code {
+  font-family: 'JetBrains Mono', monospace;
+  background: #ede9e1;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-size: 0.88em;
+}
+
+.ProseMirror pre {
+  background: #2a2520;
+  color: #ede9e1;
+  padding: 1rem 1.5rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 1.5rem 0;
+}
+.ProseMirror pre code { background: none; padding: 0; color: inherit; }
+
+.ProseMirror ul, .ProseMirror ol {
+  padding-left: 1.8rem;
+  margin: 0.8rem 0;
+}
+.ProseMirror li { margin: 0.3rem 0; }
+
+.ProseMirror hr {
+  border: none;
+  border-top: 2px solid #ede9e1;
+  margin: 2.5rem 0;
+}
+
+.ProseMirror a {
+  color: #d4522b;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ProseMirror mark {
+  background: #fae4d8;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* ── Layout: book ── */
+.layout-book .ProseMirror {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 5rem 4rem;
+  font-size: 17px;
+  line-height: 2;
+}
+
+/* ── Layout: thesis ── */
+.layout-thesis .ProseMirror {
+  font-family: 'Times New Roman', serif;
+  font-size: 12pt;
+  line-height: 2;
+  padding: 4rem 5rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* ── Layout: paper ── */
+.layout-paper .ProseMirror {
+  font-family: 'Figtree', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 3rem 4rem;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* ── AI panel animations ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.ai-loading span:nth-child(2) { animation: pulse-dot 1.2s 0.2s infinite; }
+.ai-loading span:nth-child(3) { animation: pulse-dot 1.2s 0.4s infinite; }
+.ai-loading span { animation: pulse-dot 1.2s infinite; display: inline-block; width: 6px; height: 6px; background: #d4522b; border-radius: 50; margin: 0 2px; }
+
+/* ── Prose selections ── */
+.ProseMirror ::selection {
+  background: rgba(212, 82, 43, 0.18);
+}
+
+/* ── Images ── */
+.ProseMirror img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: outline 0.1s;
+}
+.ProseMirror img:hover {
+  outline: 2px solid rgba(212, 82, 43, 0.4);
+}
+.ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #d4522b;
+}
+
+/* ── Table styles ── */
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+}
+.ProseMirror td, .ProseMirror th {
+  border: 1px solid #d6cfc0;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.ProseMirror th {
+  background: #ede9e1;
+  font-family: 'Figtree', sans-serif;
+  font-weight: 600;
+  font-size: 0.9em;
+}
