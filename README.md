@@ -97,20 +97,24 @@ npm run build
 ## 🛣️ Development Roadmap
 
 ### Implemented ✅
-- Write mode (TipTap editor, AI actions, bibliography)
-- Layout mode (frames, threading, undo/redo)
-- PDF import/export
-- AI integration (Claude + Ollama)
+- Write mode: TipTap editor, AI actions (research/suggest/restructure/replace), bibliography, TOC
+- Layout mode: draw frames (T/I), drag/resize, text threading, direct inline editing
+- Multi-selection, rubber-band, alignment toolbar, copy/paste/duplicate (⌘C/V/D)
+- Undo/Redo stack (⌘Z/⌘⇧Z), arrow key nudge, zoom (Ctrl+scroll, 25–400%)
+- Draggable guides from rulers, magnetic snap to guides/frames/margins
+- Frame appearance: background color, border, corner radius, opacity
+- System font picker — all installed fonts with live preview
+- AI Design panel (✨) — describe a style, AI applies changes to selected frame
+- Page strip (left thumbnails), layers panel, right-click context menu
+- Master pages, preflight check, baseline grid
+- PDF import with text/font structure detection
+- PDF export (print-ready), bibliography (APA, MLA, Chicago, IEEE)
 
 ### Next (Priority Order)
-1. **Rulers, Guides & Snap** — Precise object placement
-2. **Backgrounds & Borders** — Frame appearance
-3. **Multi-select & Alignment** — Layout tools
-4. **Global Paragraph Styles** — Named styles (Body, Title, etc.)
-5. **Integrated Research Browser** — Search & verify sources
-6. **Book Cover Mode** — Front + spine + back cover
-7. **Shape Tools** — Rectangles, ellipses, lines
-8. **Enhanced Export** — Bleed marks, PNG per page
+1. **Global Paragraph Styles** — Named styles (Body, Chapter Title, Caption…)
+2. **Book Cover Mode** — Front cover + spine + back as single horizontal spread
+3. **Shape Tools** — Rectangles, ellipses, lines as independent frames
+4. **Enhanced Export** — Bleed/crop marks, PNG export per page
 
 See [CLAUDE_PROMPT.md](./CLAUDE_PROMPT.md) for detailed feature specs and implementation order.
 
