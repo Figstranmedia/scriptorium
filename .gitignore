@@ -35,3 +35,6 @@ electron-*..*.json
 *.DS_Store
 
 # yarn.lock ignored — but package-lock.json IS tracked for reproducible installs
+dist-app/
+out/
+*.dmg
