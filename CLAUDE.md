@@ -169,6 +169,8 @@ Store keys: `aiProvider` ('claude'|'ollama'), `anthropicApiKey`, `ollamaModel`, 
 - ✅ Per-character typography in text frames (TipTap FontSize/FontFamily/Color extensions)
 - ✅ Affinity-style floating toolbar when editing text frames
 - ✅ BLOQUE 8: Layout → PDF export, PNG per-page export, crop marks / bleed control
+- ✅ BLOQUE 6.1: Shape frames — rect/ellipse/line with fill, stroke, dasharray, corner radius
+  - Keys: R (rect), E (ellipse), L (line) | Props panel: all shape styling | SVG export
 
 ## Export architecture (BLOQUE 8 — added 2026-04-08)
 Two export paths live in `src/renderer/src/lib/printHTML.ts`:
@@ -192,6 +194,5 @@ Two export paths live in `src/renderer/src/lib/printHTML.ts`:
 - Release & documentation — NOT yet done
 
 ## Pending
-1. **BLOQUE 6.1** — Shape tool (rectangle, line, ellipse as decorative frames)
-2. **Release v1.0** — README update, CHANGELOG, version bump, GitHub release
-3. **BLOQUE IMPORT-MEJORADA** — Word/DOCX import (mammoth.js), PDF image extraction
+1. **Release v1.0** — README update, CHANGELOG, version bump, GitHub release
+2. **BLOQUE IMPORT-MEJORADA** — Word/DOCX import (mammoth.js), PDF image extraction
