@@ -8,6 +8,8 @@ import { AISidebar } from './components/Sidebar/AISidebar'
 import { SettingsModal } from './components/SettingsModal'
 import { NewDocModal } from './components/NewDocModal'
 import { ExportModal } from './components/ExportModal'
+import { OllamaSetupBanner } from './components/OllamaSetupBanner'
+import { ModelSetupModal } from './components/ModelSetupModal'
 
 declare global {
   interface Window {
@@ -23,6 +25,9 @@ declare global {
       exportPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       exportLayoutPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number }>
+      ollamaPullModel: (modelName: string) => Promise<{ success?: boolean; error?: string }>
+      onOllamaPullProgress: (cb: (data: { status: string; percent: number | null; done: boolean }) => void) => void
+      offOllamaPullProgress: () => void
       saveDocumentAs: (title: string, data: object) => Promise<{ filePath?: string; canceled?: boolean; error?: string }>
       saveDocumentToPath: (filePath: string, data: object) => Promise<{ success?: boolean; error?: string }>
       aiChat: (messages: Array<{role: string; content: string}>, docContext: object) => Promise<{ result?: string; thinking?: string; error?: string }>
@@ -45,6 +50,9 @@ declare global {
 export default function App() {
   const store = useStore()
   const [showNewDoc, setShowNewDoc] = useState(false)
+  const [ollamaBanner, setOllamaBanner] = useState<'not-running' | 'no-models' | null>(null)
+  const [showModelSetup, setShowModelSetup] = useState(false)
+  const [installedModels, setInstalledModels] = useState<string[]>([])
 
   useEffect(() => {
     const load = async () => {
@@ -55,11 +63,25 @@ export default function App() {
       window.api.ollamaAutodetect().then((res) => {
         if (res.available) {
           store.setOllamaStatus('online')
-          if (res.activeModel) store.setOllamaActiveModel(res.activeModel)
+          const models = res.models ?? []
+          setInstalledModels(models)
+          if (res.activeModel) {
+            store.setOllamaActiveModel(res.activeModel)
+            // All good — no banner needed
+          } else if (models.length === 0) {
+            // Ollama running but no models → show blue banner
+            setOllamaBanner('no-models')
+          }
         } else {
           store.setOllamaStatus('offline')
+          // Only show banner if Claude key is also empty (otherwise Claude is the active provider)
+          const savedKey = store.apiKey
+          if (!savedKey) setOllamaBanner('not-running')
         }
-      }).catch(() => store.setOllamaStatus('offline'))
+      }).catch(() => {
+        store.setOllamaStatus('offline')
+        if (!store.apiKey) setOllamaBanner('not-running')
+      })
       const docs = await window.api.loadDocuments()
       const loaded = Object.values(docs) as any[]
       if (loaded.length > 0) {
@@ -145,6 +167,15 @@ export default function App() {
         onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
       />
 
+      {/* Ollama setup banner — appears only when needed */}
+      {ollamaBanner && (
+        <OllamaSetupBanner
+          mode={ollamaBanner}
+          onSetupModels={() => { setShowModelSetup(true); setOllamaBanner(null) }}
+          onDismiss={() => setOllamaBanner(null)}
+        />
+      )}
+
       <div className="flex flex-1 overflow-hidden">
         <DocSidebar store={store} onNewDoc={() => setShowNewDoc(true)} onSave={handleSave} />
 
@@ -174,7 +205,24 @@ export default function App() {
         <AISidebar store={store} onSave={handleSave} onInsertCitation={handleInsertCitation} />
       </div>
 
-      {store.showSettings  && <SettingsModal store={store} />}
+      {store.showSettings && (
+        <SettingsModal
+          store={store}
+          onOpenModelSetup={() => { store.setShowSettings(false); setShowModelSetup(true) }}
+        />
+      )}
+      {showModelSetup && (
+        <ModelSetupModal
+          installedModels={installedModels}
+          onClose={() => setShowModelSetup(false)}
+          onModelInstalled={(modelId) => {
+            setInstalledModels(prev => [...prev.filter(m => m !== modelId), modelId])
+            store.setOllamaStatus('online')
+            store.setOllamaActiveModel(modelId)
+            setShowModelSetup(false)
+          }}
+        />
+      )}
       {store.showExport && store.activeDoc && (
         <ExportModal document={store.activeDoc} onClose={() => store.setShowExport(false)} />
       )}

@@ -29,6 +29,11 @@ contextBridge.exposeInMainWorld('api', {
   // Ollama
   ollamaListModels: () => ipcRenderer.invoke('ollama:list-models'),
   ollamaAutodetect: () => ipcRenderer.invoke('ollama:autodetect'),
+  ollamaPullModel: (modelName: string) => ipcRenderer.invoke('ollama:pull-model', modelName),
+  onOllamaPullProgress: (cb: (data: { status: string; percent: number | null; done: boolean }) => void) => {
+    ipcRenderer.on('ollama:pull-progress', (_e, data) => cb(data))
+  },
+  offOllamaPullProgress: () => ipcRenderer.removeAllListeners('ollama:pull-progress'),
 
   // AI Chat (conversational, with thinking)
   aiChat: (messages: Array<{role: string; content: string}>, docContext: object) =>

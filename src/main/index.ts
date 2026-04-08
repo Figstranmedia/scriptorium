@@ -529,6 +529,49 @@ ipcMain.handle('ollama:autodetect', async () => {
   }
 })
 
+// ─── IPC: Ollama pull model (streaming progress) ─────────────────────────────
+ipcMain.handle('ollama:pull-model', async (event, modelName: string) => {
+  const ollamaUrl = store.get('ollamaUrl', 'http://localhost:11434') as string
+  try {
+    const res = await fetch(`${ollamaUrl}/api/pull`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: modelName, stream: true }),
+    })
+    if (!res.ok || !res.body) return { error: `Ollama respondió ${res.status}` }
+
+    const reader = (res.body as any).getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const json = JSON.parse(line) as { status?: string; completed?: number; total?: number }
+          const percent = (json.total ?? 0) > 0 ? Math.round(((json.completed ?? 0) / json.total!) * 100) : null
+          const isDone = json.status === 'success'
+          if (!event.sender.isDestroyed()) {
+            event.sender.send('ollama:pull-progress', { status: json.status ?? '', percent, done: isDone })
+          }
+          if (isDone) {
+            store.set('ollamaModel', modelName)
+            store.set('aiProvider', 'ollama')
+          }
+        } catch { /* non-JSON line, ignore */ }
+      }
+    }
+    return { success: true }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Error al descargar modelo' }
+  }
+})
+
 // ─── IPC: AI actions ─────────────────────────────────────────────────────────
 ipcMain.handle('ai:research', async (_event, selectedText: string, context: string) => {
   try {

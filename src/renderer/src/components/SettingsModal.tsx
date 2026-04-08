@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react'
 
-interface Props { store: any }
+interface Props {
+  store: any
+  onOpenModelSetup?: () => void
+}
 
-export function SettingsModal({ store }: Props) {
+export function SettingsModal({ store, onOpenModelSetup }: Props) {
   const [provider, setProvider] = useState<'claude' | 'ollama'>('ollama')
   const [apiKey, setApiKey] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
@@ -160,6 +163,17 @@ export function SettingsModal({ store }: Props) {
                 <p className="text-[10px] text-ink-400 mt-1 font-sans">
                   Recomendados: <strong>llama3</strong>, <strong>mistral</strong>, <strong>gemma3</strong>, <strong>qwen2.5</strong>
                 </p>
+                {onOpenModelSetup && (
+                  <button
+                    onClick={onOpenModelSetup}
+                    className="mt-2 text-xs font-sans px-3 py-1.5 rounded-lg border transition"
+                    style={{ borderColor: '#c7d2fe', color: '#6366f1' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#eef2ff' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    ⬇ Descargar nuevo modelo…
+                  </button>
+                )}
               </div>
             </div>
           )}
