@@ -3,7 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import Store from 'electron-store'
 import Anthropic from '@anthropic-ai/sdk'
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 
 const store = new Store()
 
@@ -90,6 +90,32 @@ ipcMain.handle('store:delete-document', (_event, id: string) => {
   return true
 })
 
+// ─── IPC: Save to file (Guardar / Guardar como) ──────────────────────────────
+ipcMain.handle('doc:save-as', async (_event, title: string, data: object) => {
+  const safeName = (title || 'documento').replace(/[/\\:*?"<>|]/g, '').trim() || 'documento'
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Guardar documento como…',
+    defaultPath: `${safeName}.scriptorium`,
+    filters: [{ name: 'Scriptorium', extensions: ['scriptorium'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+  try {
+    writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+    return { filePath }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
+ipcMain.handle('doc:save-to-path', async (_event, filePath: string, data: object) => {
+  try {
+    writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+    return { success: true }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
 // ─── IPC: PDF Export ─────────────────────────────────────────────────────────
 ipcMain.handle('export:pdf', async (_event, html: string, title: string) => {
   const { canceled, filePath } = await dialog.showSaveDialog({
@@ -122,6 +148,74 @@ ipcMain.handle('export:pdf', async (_event, html: string, title: string) => {
     printWin.destroy()
     return { error: err instanceof Error ? err.message : 'Error al exportar PDF' }
   }
+})
+
+// ─── IPC: Layout PDF Export ──────────────────────────────────────────────────
+ipcMain.handle('export:layout-pdf', async (_event, html: string, title: string) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Exportar maquetación como PDF',
+    defaultPath: `${title.replace(/[^a-zA-Z0-9\s-]/g, '').trim() || 'maquetacion'}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+
+  const printWin = new BrowserWindow({
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  })
+  try {
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+    await new Promise(r => setTimeout(r, 1500))
+    const pdfBuffer = await printWin.webContents.printToPDF({
+      printBackground: true,
+      margins: { marginType: 'none' },
+    })
+    writeFileSync(filePath, pdfBuffer)
+    printWin.destroy()
+    return { success: true, filePath }
+  } catch (err: unknown) {
+    printWin.destroy()
+    return { error: err instanceof Error ? err.message : 'Error al exportar PDF de maquetación' }
+  }
+})
+
+// ─── IPC: PNG per-page Export ─────────────────────────────────────────────────
+ipcMain.handle('export:png-pages', async (
+  _event,
+  pages: Array<{ html: string; widthPx: number; heightPx: number }>,
+  title: string
+) => {
+  const { canceled, filePath: folderPath } = await dialog.showSaveDialog({
+    title: 'Exportar páginas como PNG — elige carpeta y nombre base',
+    defaultPath: title.replace(/[^a-zA-Z0-9\s-]/g, '').trim() || 'paginas',
+    buttonLabel: 'Exportar aquí',
+  })
+  if (canceled || !folderPath) return { canceled: true }
+
+  const baseName = folderPath.replace(/\.\w+$/, '')
+  const savedPaths: string[] = []
+
+  for (let i = 0; i < pages.length; i++) {
+    const { html, widthPx, heightPx } = pages[i]
+    const capWin = new BrowserWindow({
+      width: Math.round(widthPx),
+      height: Math.round(heightPx),
+      show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    })
+    try {
+      await capWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+      await new Promise(r => setTimeout(r, 1000))
+      const img = await capWin.webContents.capturePage()
+      const pngPath = `${baseName}_p${String(i + 1).padStart(2, '0')}.png`
+      writeFileSync(pngPath, img.toPNG())
+      savedPaths.push(pngPath)
+    } finally {
+      capWin.destroy()
+    }
+  }
+
+  return { success: true, paths: savedPaths, count: savedPaths.length }
 })
 
 // ─── IPC: Fonts ──────────────────────────────────────────────────────────────
@@ -191,6 +285,214 @@ async function callAI(prompt: string, maxTokens = 1024): Promise<string> {
   const content = message.content[0]
   return content.type === 'text' ? content.text : ''
 }
+
+// Multi-turn conversation for chat interface
+async function callAIChat(
+  system: string,
+  messages: Array<{ role: string; content: string }>,
+  maxTokens = 2048
+): Promise<string> {
+  const provider = store.get('aiProvider', 'claude') as string
+
+  if (provider === 'ollama') {
+    const ollamaUrl = store.get('ollamaUrl', 'http://localhost:11434') as string
+    const model = store.get('ollamaModel', 'llama3') as string
+    const res = await fetch(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: system }, ...messages],
+        stream: false,
+      })
+    })
+    if (!res.ok) throw new Error(`Ollama error: ${res.status}`)
+    const json = await res.json() as { message?: { content: string }; response?: string }
+    return json.message?.content || json.response || ''
+  }
+
+  // Claude
+  const apiKey = store.get('anthropicApiKey', '') as string
+  if (!apiKey) throw new Error('No hay API key configurada. Ve a ⚙ Ajustes.')
+  const client = new Anthropic({ apiKey })
+  const msg = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    system,
+    messages: messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+  })
+  const c = msg.content[0]
+  return c.type === 'text' ? c.text : ''
+}
+
+// ─── IPC: Conversational AI chat (with optional thinking) ────────────────────
+ipcMain.handle('ai:chat', async (
+  _event,
+  messages: Array<{ role: string; content: string }>,
+  docContext: { title: string; content: string; docType: string; conversationSummary?: string }
+) => {
+  try {
+    const docSummary = docContext.content
+      ? `\n\nContenido actual del documento:\n${docContext.content.slice(0, 10000)}`
+      : '\n\n(Sin contenido de texto aún.)'
+
+    const memorySection = docContext.conversationSummary
+      ? `\n\nResumen de conversación previa (memoria comprimida):\n${docContext.conversationSummary}`
+      : ''
+
+    const system = `Eres un asistente editorial integrado en Scriptorium, software profesional de escritura y diseño de libros.
+
+Documento activo: "${docContext.title}" — tipo: ${docContext.docType}${memorySection}${docSummary}
+
+Tu rol:
+- Conversas fluidamente en español sobre el proyecto del usuario
+- Investigas, analizas el texto, sugieres estructuras, reescribes fragmentos, opinas editorialmente
+- Lees el contenido completo cuando el análisis lo requiere
+- Propones acciones proactivamente: "¿Profundizo en X?" o "Podría restructurar esto si quieres"
+- Das opiniones directas y con criterio — no eres neutral cuando hay algo que mejorar
+- Si el usuario pega texto para editar, lo editas y devuelves versión mejorada
+- Para investigación, citas datos concretos con fuentes cuando puedes
+- Eres conciso pero completo; usas listas y encabezados cuando realmente ayudan`
+
+    const provider = store.get('aiProvider', 'claude') as string
+
+    // Try Claude with extended thinking
+    if (provider === 'claude') {
+      const apiKey = store.get('anthropicApiKey', '') as string
+      if (!apiKey) throw new Error('No hay API key configurada. Ve a ⚙ Ajustes.')
+      const client = new Anthropic({ apiKey })
+
+      try {
+        const msg = await client.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 16000,
+          thinking: { type: 'enabled', budget_tokens: 8000 },
+          system,
+          messages: messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        } as Parameters<typeof client.messages.create>[0])
+
+        let thinking = ''
+        let result = ''
+        for (const block of msg.content) {
+          if (block.type === 'thinking') thinking = (block as any).thinking || ''
+          if (block.type === 'text') result = block.text
+        }
+        return { result, thinking }
+      } catch {
+        // Fallback without thinking (older API version or unsupported)
+        const msg = await client.messages.create({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 4096,
+          system,
+          messages: messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        })
+        const c = msg.content[0]
+        return { result: c.type === 'text' ? c.text : '' }
+      }
+    }
+
+    // Ollama — no thinking, but simulate with chain-of-thought prefix
+    const result = await callAIChat(system, messages)
+    return { result }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+// ─── IPC: Summarize conversation ─────────────────────────────────────────────
+ipcMain.handle('ai:summarize-chat', async (
+  _event,
+  messages: Array<{ role: string; content: string }>,
+  docTitle: string
+) => {
+  try {
+    const transcript = messages
+      .map(m => `${m.role === 'user' ? 'Usuario' : 'Asistente'}: ${m.content}`)
+      .join('\n\n')
+
+    const summaryPrompt = `Eres un asistente de investigación. Tienes esta conversación entre un escritor y su asistente editorial sobre el documento "${docTitle}":
+
+---
+${transcript.slice(0, 12000)}
+---
+
+Genera un resumen en Markdown con:
+1. **Temas discutidos** — lista de los principales temas abordados
+2. **Hallazgos e insights clave** — conclusiones, datos, ideas importantes que emergieron
+3. **Decisiones y cambios acordados** — qué decidió el escritor cambiar o hacer
+4. **Preguntas abiertas** — temas que quedaron pendientes o sin resolver
+5. **Próximos pasos** — acciones concretas sugeridas
+
+Sé específico y útil. Este resumen se usará como memoria para continuar la conversación en sesiones futuras.`
+
+    const result = await callAI(summaryPrompt, 2048)
+    return { result }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+// ─── IPC: Create/update project folder ───────────────────────────────────────
+ipcMain.handle('project:save-folder', async (
+  _event,
+  docTitle: string,
+  docData: object,
+  investigacionMd: string,
+  existingFolderPath?: string
+) => {
+  try {
+    let folderPath = existingFolderPath
+
+    if (!folderPath) {
+      const safeTitle = docTitle.replace(/[/\\:*?"<>|]/g, '').trim() || 'sin-titulo'
+      const defaultBase = join(app.getPath('documents'), 'Scriptorium')
+      const defaultFolder = join(defaultBase, safeTitle)
+
+      const { canceled, filePath } = await dialog.showSaveDialog({
+        title: 'Guardar carpeta del proyecto',
+        defaultPath: defaultFolder,
+        buttonLabel: 'Crear proyecto',
+        properties: ['createDirectory'],
+        nameFieldLabel: 'Nombre del proyecto:',
+      })
+      if (canceled || !filePath) return { canceled: true }
+      folderPath = filePath
+    }
+
+    // Create directories
+    mkdirSync(folderPath, { recursive: true })
+    mkdirSync(join(folderPath, 'imagenes'), { recursive: true })
+
+    // Save .scpt document
+    const safeTitle = docTitle.replace(/[/\\:*?"<>|]/g, '').trim() || 'documento'
+    const scptPath = join(folderPath, `${safeTitle}.scpt`)
+    writeFileSync(scptPath, JSON.stringify(docData, null, 2), 'utf-8')
+
+    // Save investigacion.md
+    const mdPath = join(folderPath, 'investigacion.md')
+    writeFileSync(mdPath, investigacionMd, 'utf-8')
+
+    return { folderPath, scptPath, mdPath }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+})
+
+// ─── IPC: Update investigacion.md in existing project folder ─────────────────
+ipcMain.handle('project:update-md', async (
+  _event,
+  folderPath: string,
+  content: string
+) => {
+  try {
+    if (!existsSync(folderPath)) return { error: 'Carpeta no encontrada' }
+    const mdPath = join(folderPath, 'investigacion.md')
+    writeFileSync(mdPath, content, 'utf-8')
+    return { success: true }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+})
 
 // ─── IPC: Ollama model list ───────────────────────────────────────────────────
 ipcMain.handle('ollama:list-models', async () => {

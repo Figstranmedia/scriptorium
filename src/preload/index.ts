@@ -11,9 +11,14 @@ contextBridge.exposeInMainWorld('api', {
   saveDocument: (id: string, data: object) => ipcRenderer.invoke('store:save-document', id, data),
   loadDocuments: () => ipcRenderer.invoke('store:load-documents'),
   deleteDocument: (id: string) => ipcRenderer.invoke('store:delete-document', id),
+  saveDocumentAs: (title: string, data: object) => ipcRenderer.invoke('doc:save-as', title, data),
+  saveDocumentToPath: (filePath: string, data: object) => ipcRenderer.invoke('doc:save-to-path', filePath, data),
 
   // Export
   exportPDF: (html: string, title: string) => ipcRenderer.invoke('export:pdf', html, title),
+  exportLayoutPDF: (html: string, title: string) => ipcRenderer.invoke('export:layout-pdf', html, title),
+  exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) =>
+    ipcRenderer.invoke('export:png-pages', pages, title),
 
   // Images
   pickImage: () => ipcRenderer.invoke('image:pick'),
@@ -24,6 +29,16 @@ contextBridge.exposeInMainWorld('api', {
   // Ollama
   ollamaListModels: () => ipcRenderer.invoke('ollama:list-models'),
   ollamaAutodetect: () => ipcRenderer.invoke('ollama:autodetect'),
+
+  // AI Chat (conversational, with thinking)
+  aiChat: (messages: Array<{role: string; content: string}>, docContext: object) =>
+    ipcRenderer.invoke('ai:chat', messages, docContext),
+  aiSummarizeChat: (messages: Array<{role: string; content: string}>, docTitle: string) =>
+    ipcRenderer.invoke('ai:summarize-chat', messages, docTitle),
+  projectSaveFolder: (docTitle: string, docData: object, investigacionMd: string, existingPath?: string) =>
+    ipcRenderer.invoke('project:save-folder', docTitle, docData, investigacionMd, existingPath),
+  projectUpdateMd: (folderPath: string, content: string) =>
+    ipcRenderer.invoke('project:update-md', folderPath, content),
 
   // AI
   aiResearch: (text: string, ctx: string) => ipcRenderer.invoke('ai:research', text, ctx),

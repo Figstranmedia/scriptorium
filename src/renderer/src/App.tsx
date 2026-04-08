@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback, useState } from 'react'
 import { useStore } from './store/useStore'
+import type { CoverConfig } from './store/useStore'
 import { TitleBar } from './components/TitleBar'
 import { DocSidebar } from './components/DocSidebar'
 import { Editor } from './components/Editor/Editor'
@@ -20,6 +21,14 @@ declare global {
       deleteDocument: (id: string) => Promise<boolean>
       pickImage: () => Promise<string | null>
       exportPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
+      exportLayoutPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
+      exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number }>
+      saveDocumentAs: (title: string, data: object) => Promise<{ filePath?: string; canceled?: boolean; error?: string }>
+      saveDocumentToPath: (filePath: string, data: object) => Promise<{ success?: boolean; error?: string }>
+      aiChat: (messages: Array<{role: string; content: string}>, docContext: object) => Promise<{ result?: string; thinking?: string; error?: string }>
+      aiSummarizeChat: (messages: Array<{role: string; content: string}>, docTitle: string) => Promise<{ result?: string; error?: string }>
+      projectSaveFolder: (docTitle: string, docData: object, investigacionMd: string, existingPath?: string) => Promise<{ folderPath?: string; scptPath?: string; mdPath?: string; canceled?: boolean; error?: string }>
+      projectUpdateMd: (folderPath: string, content: string) => Promise<{ success?: boolean; error?: string }>
       ollamaListModels: () => Promise<{ models?: string[]; error?: string }>
       ollamaAutodetect: () => Promise<{ available: boolean; models?: string[]; activeModel?: string }>
       aiResearch: (text: string, ctx: string) => Promise<{ result?: string; error?: string }>
@@ -68,27 +77,56 @@ export default function App() {
     await window.api.saveDocument(id, data)
   }, [])
 
-  const handleAIAction = useCallback(async (action: string, text: string) => {
-    if (!text.trim()) return
-    const docText = store.activeDoc?.content || ''
-    const plainContext = docText.replace(/<[^>]+>/g, ' ').slice(0, 600)
+  // Save current doc to its known file path; if none, open save-as dialog
+  const handleSaveFile = useCallback(async () => {
+    const doc = store.activeDoc
+    if (!doc) return
+    if (doc.filePath) {
+      await window.api.saveDocumentToPath(doc.filePath, doc)
+    } else {
+      const res = await window.api.saveDocumentAs(doc.title, doc)
+      if (res.filePath) {
+        store.updateDocument(doc.id, { filePath: res.filePath })
+        await window.api.saveDocument(doc.id, { ...doc, filePath: res.filePath })
+      }
+    }
+  }, [store])
 
+  const handleSaveAs = useCallback(async () => {
+    const doc = store.activeDoc
+    if (!doc) return
+    const res = await window.api.saveDocumentAs(doc.title, doc)
+    if (res.filePath) {
+      store.updateDocument(doc.id, { filePath: res.filePath })
+      await window.api.saveDocument(doc.id, { ...doc, filePath: res.filePath })
+    }
+  }, [store])
+
+  // ⌘S / ⌘⇧S global shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (e.shiftKey) handleSaveAs()
+        else handleSaveFile()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [handleSaveFile, handleSaveAs])
+
+  const handleAIAction = useCallback((action: string, text: string) => {
+    if (!text.trim()) return
     store.setSidebarOpen(true)
     store.setSelectedText(text)
-    store.setAIResult({ type: action as any, loading: true, content: '', error: '' })
-    store.setSidebarTab(action as any)
-
-    let res: { result?: string; error?: string } = {}
-    if (action === 'research')    res = await window.api.aiResearch(text, plainContext)
-    else if (action === 'suggest') res = await window.api.aiSuggest(text, plainContext)
-    else if (action === 'restructure') res = await window.api.aiRestructure(text, store.activeDoc?.docType || 'book')
-
-    store.setAIResult({
-      type: action as any,
-      loading: false,
-      content: res.result || '',
-      error: res.error || '',
-    })
+    // Inject into chat as a pending message
+    const actionLabels: Record<string, string> = {
+      research: 'Investiga este fragmento',
+      suggest: 'Sugiere alternativas para',
+      restructure: 'Ayúdame a restructurar',
+    }
+    const label = actionLabels[action] || 'Analiza'
+    store.setPendingChatMessage({ text: `${label}: "${text.slice(0, 400)}"`, action })
   }, [store])
 
   // Insert text at current editor cursor (for citations)
@@ -102,6 +140,8 @@ export default function App() {
       <TitleBar
         store={store}
         onNewDoc={() => setShowNewDoc(true)}
+        onSave={handleSaveFile}
+        onSaveAs={handleSaveAs}
         onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
       />
 
@@ -131,9 +171,7 @@ export default function App() {
           )}
         </main>
 
-        {store.sidebarOpen && (
-          <AISidebar store={store} onSave={handleSave} onInsertCitation={handleInsertCitation} />
-        )}
+        <AISidebar store={store} onSave={handleSave} onInsertCitation={handleInsertCitation} />
       </div>
 
       {store.showSettings  && <SettingsModal store={store} />}
@@ -141,7 +179,16 @@ export default function App() {
         <ExportModal document={store.activeDoc} onClose={() => store.setShowExport(false)} />
       )}
       {showNewDoc && (
-        <NewDocModal onClose={() => setShowNewDoc(false)} onCreate={(type) => { store.createDocument(type); setShowNewDoc(false) }} />
+        <NewDocModal
+          onClose={() => setShowNewDoc(false)}
+          onCreate={(type, coverConfig?: CoverConfig) => {
+            const doc = store.createDocument(type)
+            if (coverConfig) {
+              store.updateDocument(doc.id, { coverConfig, title: 'Portada sin título' })
+            }
+            setShowNewDoc(false)
+          }}
+        />
       )}
     </div>
   )

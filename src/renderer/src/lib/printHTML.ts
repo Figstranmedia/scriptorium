@@ -1,4 +1,6 @@
 import type { Document, CitationStyle } from '../store/useStore'
+import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame } from './threadEngine'
+import { isImageFrame } from './threadEngine'
 import { formatReference } from './citations'
 
 export interface PDFOptions {
@@ -10,6 +12,126 @@ export interface PDFOptions {
   includePageNumbers: boolean
   pageNumberPosition: 'bottom-center' | 'bottom-right' | 'top-right'
   citationStyle: CitationStyle
+}
+
+// ─── Layout Export ────────────────────────────────────────────────────────────
+
+export interface LayoutExportOptions {
+  bleedMM: number      // 0 = no bleed, 3 = standard print bleed
+  cropMarks: boolean
+  includeBackground: boolean
+}
+
+export const DEFAULT_LAYOUT_EXPORT_OPTIONS: LayoutExportOptions = {
+  bleedMM: 0,
+  cropMarks: false,
+  includeBackground: true,
+}
+
+const LAYOUT_PAGE_SIZES: Record<string, { widthMM: number; heightMM: number }> = {
+  A4:     { widthMM: 210, heightMM: 297 },
+  Letter: { widthMM: 216, heightMM: 279 },
+  A5:     { widthMM: 148, heightMM: 210 },
+  Legal:  { widthMM: 216, heightMM: 356 },
+}
+
+/** Convert layout px (96 DPI) to mm */
+function pxToMm(px: number): number {
+  return (px * 25.4) / 96
+}
+
+function resolveFont(family: string): string {
+  if (family === 'serif') return 'Georgia, "Times New Roman", serif'
+  if (family === 'sans')  return '"Helvetica Neue", Arial, sans-serif'
+  if (family === 'mono')  return '"Courier New", monospace'
+  return `"${family}", Georgia, serif`
+}
+
+function frameToHTML(f: AnyLayoutFrame): string {
+  const xMm  = pxToMm(f.x).toFixed(3)
+  const yMm  = pxToMm(f.y).toFixed(3)
+  const wMm  = pxToMm(f.width).toFixed(3)
+  const hMm  = pxToMm(f.height).toFixed(3)
+  const rMm  = pxToMm(f.cornerRadius ?? 0).toFixed(3)
+
+  if (isImageFrame(f)) {
+    const img = f as LayoutImageFrame
+    const fitCSS = img.fit === 'fit' ? 'object-fit:contain'
+      : img.fit === 'fill' ? 'object-fit:cover'
+      : 'object-fit:cover'
+    const border = img.borderWidth > 0
+      ? `border:${pxToMm(img.borderWidth).toFixed(2)}mm solid ${img.borderColor};` : ''
+    return `<div style="position:absolute;left:${xMm}mm;top:${yMm}mm;width:${wMm}mm;height:${hMm}mm;overflow:hidden;border-radius:${rMm}mm;opacity:${img.opacity};${border}">` +
+      `<img src="${img.src}" style="width:100%;height:100%;display:block;${fitCSS}" /></div>`
+  }
+
+  const tf = f as LayoutFrame
+  const ptop  = pxToMm(tf.paddingTop    ?? 4).toFixed(2)
+  const pright = pxToMm(tf.paddingRight ?? 6).toFixed(2)
+  const pbot  = pxToMm(tf.paddingBottom ?? 4).toFixed(2)
+  const pleft = pxToMm(tf.paddingLeft   ?? 6).toFixed(2)
+  const bg    = (tf.backgroundColor && tf.backgroundColor !== 'transparent') ? `background:${tf.backgroundColor};` : ''
+  const border = tf.borderWidth > 0
+    ? `border:${pxToMm(tf.borderWidth).toFixed(2)}mm ${tf.borderStyle ?? 'solid'} ${tf.borderColor};` : ''
+  const cols  = tf.columns > 1
+    ? `column-count:${tf.columns};column-gap:${pxToMm(tf.columnGutter ?? 12).toFixed(2)}mm;` : ''
+
+  return `<div style="position:absolute;left:${xMm}mm;top:${yMm}mm;width:${wMm}mm;height:${hMm}mm;overflow:hidden;` +
+    `font-family:${resolveFont(tf.fontFamily)};font-size:${tf.fontSize}pt;line-height:${tf.lineHeight};` +
+    `font-weight:${tf.fontWeight};font-style:${tf.fontStyle};text-align:${tf.textAlign};color:${tf.textColor};` +
+    `letter-spacing:${(tf.letterSpacing ?? 0) / 1000}em;` +
+    `padding:${ptop}mm ${pright}mm ${pbot}mm ${pleft}mm;` +
+    `${bg}${border}border-radius:${rMm}mm;opacity:${tf.opacity ?? 1};${cols}">${tf.ownContent || ''}</div>`
+}
+
+/** Generate full print-ready HTML for a layout document */
+export function generateLayoutPrintHTML(doc: Document, opts: LayoutExportOptions): string {
+  const frames   = (doc.layoutFrames  || []) as AnyLayoutFrame[]
+  const pageCount = doc.layoutPageCount || 1
+  const sizeKey  = doc.layoutPageSize  || 'A4'
+  const pageSize = LAYOUT_PAGE_SIZES[sizeKey] ?? LAYOUT_PAGE_SIZES.A4
+  const { widthMM, heightMM } = pageSize
+  const bleed = opts.bleedMM
+  const totalW = widthMM + bleed * 2
+  const totalH = heightMM + bleed * 2
+
+  const cropMarkCSS = opts.cropMarks && bleed > 0 ? `
+    .cm{position:absolute;background:#000000}
+    .cm-tl-h{top:${(bleed-0.5).toFixed(1)}mm;left:0;width:${(bleed-0.3).toFixed(1)}mm;height:.2mm}
+    .cm-tl-v{top:0;left:${(bleed-0.5).toFixed(1)}mm;width:.2mm;height:${(bleed-0.3).toFixed(1)}mm}
+    .cm-tr-h{top:${(bleed-0.5).toFixed(1)}mm;right:0;width:${(bleed-0.3).toFixed(1)}mm;height:.2mm}
+    .cm-tr-v{top:0;right:${(bleed-0.5).toFixed(1)}mm;width:.2mm;height:${(bleed-0.3).toFixed(1)}mm}
+    .cm-bl-h{bottom:${(bleed-0.5).toFixed(1)}mm;left:0;width:${(bleed-0.3).toFixed(1)}mm;height:.2mm}
+    .cm-bl-v{bottom:0;left:${(bleed-0.5).toFixed(1)}mm;width:.2mm;height:${(bleed-0.3).toFixed(1)}mm}
+    .cm-br-h{bottom:${(bleed-0.5).toFixed(1)}mm;right:0;width:${(bleed-0.3).toFixed(1)}mm;height:.2mm}
+    .cm-br-v{bottom:0;right:${(bleed-0.5).toFixed(1)}mm;width:.2mm;height:${(bleed-0.3).toFixed(1)}mm}
+  ` : ''
+
+  const cropMarkHTML = opts.cropMarks && bleed > 0
+    ? '<div class="cm cm-tl-h"></div><div class="cm cm-tl-v"></div>' +
+      '<div class="cm cm-tr-h"></div><div class="cm cm-tr-v"></div>' +
+      '<div class="cm cm-bl-h"></div><div class="cm cm-bl-v"></div>' +
+      '<div class="cm cm-br-h"></div><div class="cm cm-br-v"></div>'
+    : ''
+
+  const pagesHTML = Array.from({ length: pageCount }, (_, i) => {
+    const pFrames = [...frames.filter(f => f.pageIndex === i)]
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+    const framesHTML = pFrames.map(frameToHTML).join('')
+
+    return `<div style="position:relative;width:${totalW}mm;height:${totalH}mm;background:white;overflow:hidden;page-break-after:always;">` +
+      cropMarkHTML +
+      `<div style="position:absolute;top:${bleed}mm;left:${bleed}mm;width:${widthMM}mm;height:${heightMM}mm;overflow:hidden;">` +
+      framesHTML + '</div></div>'
+  }).join('\n')
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<style>
+  @page{size:${totalW}mm ${totalH}mm;margin:0}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{margin:0;padding:0;background:#888}
+  ${cropMarkCSS}
+</style></head><body>${pagesHTML}</body></html>`
 }
 
 export const DEFAULT_PDF_OPTIONS: PDFOptions = {
