@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Ollama
   ollamaListModels: () => ipcRenderer.invoke('ollama:list-models'),
+  ollamaAutodetect: () => ipcRenderer.invoke('ollama:autodetect'),
 
   // AI
   aiResearch: (text: string, ctx: string) => ipcRenderer.invoke('ai:research', text, ctx),

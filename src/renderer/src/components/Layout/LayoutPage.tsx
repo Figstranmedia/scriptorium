@@ -48,6 +48,7 @@ interface Props {
   onCompleteLink: (targetId: string) => void
   onDoubleClickGuide?: (guideId: string) => void
   onContextMenu?: (e: React.MouseEvent, frameId: string | null) => void
+  onAIAction?: (action: string, text: string) => void
   scale: number
 }
 
@@ -57,7 +58,7 @@ export function LayoutPage({
   linkingFrom, drawMode, guides, snapLines = [],
   onSelectFrame, onSelectFramesByRect, onUpdateFrame, onDeleteFrame,
   onAddTextFrame, onAddImageFrame, onStartLink, onCompleteLink,
-  onDoubleClickGuide, onContextMenu, scale,
+  onDoubleClickGuide, onContextMenu, onAIAction, scale,
 }: Props) {
   const pageRef = useRef<HTMLDivElement>(null)
   const widthPx = mmToPx(pageSize.widthMM)
@@ -249,6 +250,7 @@ export function LayoutPage({
               onDelete={() => onDeleteFrame(frame.id)}
               onStartLink={() => onStartLink(frame.id)}
               onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, frame.id) }}
+              onAIAction={onAIAction}
               scale={scale}
             />
           )

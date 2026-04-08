@@ -23,6 +23,27 @@ export interface Reference {
   accessDate?: string
 }
 
+export interface ParagraphStyle {
+  id: string
+  name: string
+  fontFamily: string
+  fontSize: number
+  lineHeight: number
+  fontWeight: 'normal' | 'bold'
+  fontStyle: 'normal' | 'italic'
+  textAlign: 'left' | 'center' | 'right' | 'justify'
+  textColor: string
+  letterSpacing: number
+}
+
+export const DEFAULT_PARAGRAPH_STYLES: ParagraphStyle[] = [
+  { id: 'ps-body',    name: 'Cuerpo',      fontFamily: 'serif', fontSize: 12, lineHeight: 1.6, fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',   textColor: '#1a1714', letterSpacing: 0 },
+  { id: 'ps-h1',     name: 'Título 1',    fontFamily: 'sans',  fontSize: 28, lineHeight: 1.2, fontWeight: 'bold',   fontStyle: 'normal', textAlign: 'left',   textColor: '#1a1714', letterSpacing: 0 },
+  { id: 'ps-h2',     name: 'Título 2',    fontFamily: 'sans',  fontSize: 20, lineHeight: 1.3, fontWeight: 'bold',   fontStyle: 'normal', textAlign: 'left',   textColor: '#1a1714', letterSpacing: 0 },
+  { id: 'ps-quote',  name: 'Epígrafe',    fontFamily: 'serif', fontSize: 11, lineHeight: 1.5, fontWeight: 'normal', fontStyle: 'italic', textAlign: 'left',   textColor: '#5c5043', letterSpacing: 0.5 },
+  { id: 'ps-caption',name: 'Pie de foto', fontFamily: 'sans',  fontSize: 9,  lineHeight: 1.4, fontWeight: 'normal', fontStyle: 'normal', textAlign: 'center', textColor: '#64748b', letterSpacing: 0 },
+]
+
 export interface Guide {
   id: string
   axis: 'h' | 'v'
@@ -44,6 +65,7 @@ export interface Document {
   layoutMasters?: any[]
   layoutPageAssignments?: Record<number, string>
   layoutGuides?: Guide[]
+  paragraphStyles?: ParagraphStyle[]
   createdAt: number
   updatedAt: number
 }
@@ -66,6 +88,8 @@ export function useStore() {
   const [apiKey, setApiKeyState] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle')
+  const [ollamaActiveModel, setOllamaActiveModel] = useState('')
 
   const activeDoc = documents.find(d => d.id === activeDocId) || null
 
@@ -79,6 +103,7 @@ export function useStore() {
       layout: docType === 'book' ? 'book' : docType === 'thesis' ? 'thesis' : docType === 'paper' ? 'paper' : 'default',
       references: [],
       citationStyle: 'apa',
+      paragraphStyles: DEFAULT_PARAGRAPH_STYLES,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
@@ -115,6 +140,8 @@ export function useStore() {
     apiKey, setApiKeyState,
     showSettings, setShowSettings,
     showExport, setShowExport,
+    ollamaStatus, setOllamaStatus,
+    ollamaActiveModel, setOllamaActiveModel,
     createDocument,
     updateDocument,
     deleteDocument,

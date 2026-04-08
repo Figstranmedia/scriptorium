@@ -21,6 +21,7 @@ declare global {
       pickImage: () => Promise<string | null>
       exportPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       ollamaListModels: () => Promise<{ models?: string[]; error?: string }>
+      ollamaAutodetect: () => Promise<{ available: boolean; models?: string[]; activeModel?: string }>
       aiResearch: (text: string, ctx: string) => Promise<{ result?: string; error?: string }>
       aiSuggest: (text: string, ctx: string) => Promise<{ result?: string; error?: string }>
       aiRestructure: (text: string, docType: string) => Promise<{ result?: string; error?: string }>
@@ -40,6 +41,16 @@ export default function App() {
     const load = async () => {
       const key = await window.api.getApiKey()
       store.setApiKeyState(key)
+      // Auto-detect Ollama on startup
+      store.setOllamaStatus('checking')
+      window.api.ollamaAutodetect().then((res) => {
+        if (res.available) {
+          store.setOllamaStatus('online')
+          if (res.activeModel) store.setOllamaActiveModel(res.activeModel)
+        } else {
+          store.setOllamaStatus('offline')
+        }
+      }).catch(() => store.setOllamaStatus('offline'))
       const docs = await window.api.loadDocuments()
       const loaded = Object.values(docs) as any[]
       if (loaded.length > 0) {
@@ -88,7 +99,11 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-ink-50 overflow-hidden">
-      <TitleBar store={store} onNewDoc={() => setShowNewDoc(true)} />
+      <TitleBar
+        store={store}
+        onNewDoc={() => setShowNewDoc(true)}
+        onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
+      />
 
       <div className="flex flex-1 overflow-hidden">
         <DocSidebar store={store} onNewDoc={() => setShowNewDoc(true)} onSave={handleSave} />

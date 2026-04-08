@@ -2,11 +2,14 @@ import React from 'react'
 import type { LayoutFrame, LayoutImageFrame, AnyLayoutFrame } from '../../lib/threadEngine'
 import { isImageFrame } from '../../lib/threadEngine'
 import { FontPicker } from './FontPicker'
+import type { ParagraphStyle } from '../../store/useStore'
 
 interface Props {
   frame: AnyLayoutFrame | null
+  styles?: ParagraphStyle[]
   onUpdate: (id: string, updates: Partial<AnyLayoutFrame>) => void
   onUnlink: (id: string) => void
+  onApplyStyle?: (frameId: string, style: ParagraphStyle) => void
 }
 
 function NumField({ label, value, min, max, step = 1, onChange }: {
@@ -39,7 +42,20 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
   )
 }
 
-export function LayoutPropertiesPanel({ frame, onUpdate, onUnlink }: Props) {
+function isStyleOverridden(tf: LayoutFrame, style: ParagraphStyle): boolean {
+  return (
+    tf.fontFamily !== style.fontFamily ||
+    tf.fontSize !== style.fontSize ||
+    tf.lineHeight !== style.lineHeight ||
+    tf.fontWeight !== style.fontWeight ||
+    tf.fontStyle !== style.fontStyle ||
+    tf.textAlign !== style.textAlign ||
+    tf.textColor !== style.textColor ||
+    (tf.letterSpacing || 0) !== style.letterSpacing
+  )
+}
+
+export function LayoutPropertiesPanel({ frame, styles = [], onUpdate, onUnlink, onApplyStyle }: Props) {
   if (!frame) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-4">
@@ -82,9 +98,41 @@ export function LayoutPropertiesPanel({ frame, onUpdate, onUnlink }: Props) {
   }
 
   const tf = frame as LayoutFrame
+  const appliedStyle = styles.find(s => s.id === tf.paragraphStyleId)
+  const overridden = appliedStyle ? isStyleOverridden(tf, appliedStyle) : false
+
   return (
     <div className="p-3 space-y-3 overflow-y-auto text-slate-700">
       <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Marco de texto</p>
+
+      {/* Paragraph style selector */}
+      {styles.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Estilo de párrafo</p>
+          <div className="flex items-center gap-1.5">
+            <select
+              value={tf.paragraphStyleId || ''}
+              onChange={e => {
+                const style = styles.find(s => s.id === e.target.value)
+                if (style && onApplyStyle) onApplyStyle(tf.id, style)
+                else onUpdate(tf.id, { paragraphStyleId: e.target.value || undefined } as Partial<LayoutFrame>)
+              }}
+              className="flex-1 text-xs px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-400 font-sans bg-white"
+            >
+              <option value="">— Sin estilo —</option>
+              {styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            {overridden && (
+              <span
+                title="Propiedades modificadas desde el estilo base. Clic para restablecer."
+                onClick={() => { if (appliedStyle && onApplyStyle) onApplyStyle(tf.id, appliedStyle) }}
+                className="text-orange-400 text-xs cursor-pointer hover:text-orange-300 transition"
+                style={{ fontFamily: 'sans-serif' }}
+              >+</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Position & size */}
       <div className="space-y-1.5">

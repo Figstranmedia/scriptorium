@@ -30,6 +30,8 @@ export interface LayoutFrame {
   fontStyle: 'normal' | 'italic'
   textColor: string
   letterSpacing: number
+  // Paragraph style reference
+  paragraphStyleId?: string
   // Layer
   zIndex: number
   locked: boolean

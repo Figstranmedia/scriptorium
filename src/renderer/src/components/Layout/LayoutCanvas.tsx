@@ -14,16 +14,19 @@ import { AIDesignPanel } from './AIDesignPanel'
 import { runPreflight } from '../../lib/preflight'
 import { parsePDF } from '../../lib/pdfImport'
 import { snapPosition } from '../../lib/snap'
-import type { Document, Guide } from '../../store/useStore'
+import type { Document, Guide, ParagraphStyle } from '../../store/useStore'
+import { DEFAULT_PARAGRAPH_STYLES } from '../../store/useStore'
+import { StylesPanel } from './StylesPanel'
 
 interface Props {
   document: Document
   onSave: (id: string, data: object) => void
+  onAIAction?: (action: string, text: string) => void
 }
 
 const MAX_HISTORY = 50
 
-export function LayoutCanvas({ document, onSave }: Props) {
+export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const [frames, setFrames] = useState<AnyLayoutFrame[]>(document.layoutFrames || [])
   const [pageCount, setPageCount] = useState<number>(Math.max(1, document.layoutPageCount || 1))
   const [pageSizeKey, setPageSizeKey] = useState<string>(document.layoutPageSize || 'A4')
@@ -32,7 +35,12 @@ export function LayoutCanvas({ document, onSave }: Props) {
   const [masters, setMasters] = useState<MasterPage[]>(document.layoutMasters || [])
   const [pageAssignments, setPageAssignments] = useState<Record<number, string>>(document.layoutPageAssignments || {})
   const [guides, setGuides] = useState<Guide[]>(document.layoutGuides || [])
-  const [rightPanelTab, setRightPanelTab] = useState<'props' | 'preflight' | 'layers' | 'masters'>('props')
+  const [rightPanelTab, setRightPanelTab] = useState<'props' | 'preflight' | 'layers' | 'masters' | 'styles'>('props')
+  const [paragraphStyles, setParagraphStyles] = useState<ParagraphStyle[]>(
+    document.paragraphStyles && document.paragraphStyles.length > 0
+      ? document.paragraphStyles
+      : DEFAULT_PARAGRAPH_STYLES
+  )
   const [baselineStep, setBaselineStep] = useState(18)
   const [linkingFrom, setLinkingFrom] = useState<string | null>(null)
   const [scale, setScale] = useState(0.7)
@@ -105,6 +113,7 @@ export function LayoutCanvas({ document, onSave }: Props) {
       layoutMasters: newMasters ?? masters,
       layoutPageAssignments: newAssignments ?? pageAssignments,
       layoutGuides: newGuides ?? guides,
+      paragraphStyles,
     })
   }, [document, onSave, pageCount, pageSizeKey, masters, pageAssignments, guides])
 
@@ -354,6 +363,56 @@ export function LayoutCanvas({ document, onSave }: Props) {
       })
       saveLayout(next)
       return next
+    })
+  }, [saveLayout])
+
+  // ── Paragraph styles ─────────────────────────────────────────────────────────
+  const handleUpdateStyles = useCallback((newStyles: ParagraphStyle[]) => {
+    setParagraphStyles(newStyles)
+    // Cascade: update all frames that reference a changed style
+    setFrames(prev => {
+      const updated = prev.map(f => {
+        if (isImageFrame(f)) return f
+        const tf = f as LayoutFrame
+        if (!tf.paragraphStyleId) return f
+        const style = newStyles.find(s => s.id === tf.paragraphStyleId)
+        if (!style) return f
+        return {
+          ...tf,
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+          fontWeight: style.fontWeight,
+          fontStyle: style.fontStyle,
+          textAlign: style.textAlign,
+          textColor: style.textColor,
+          letterSpacing: style.letterSpacing,
+        }
+      })
+      saveLayout(updated)
+      return updated
+    })
+  }, [saveLayout])
+
+  const handleApplyStyle = useCallback((frameId: string, style: ParagraphStyle) => {
+    setFrames(prev => {
+      const updated = prev.map(f => {
+        if (f.id !== frameId || isImageFrame(f)) return f
+        return {
+          ...f,
+          paragraphStyleId: style.id,
+          fontFamily: style.fontFamily,
+          fontSize: style.fontSize,
+          lineHeight: style.lineHeight,
+          fontWeight: style.fontWeight,
+          fontStyle: style.fontStyle,
+          textAlign: style.textAlign,
+          textColor: style.textColor,
+          letterSpacing: style.letterSpacing,
+        }
+      })
+      saveLayout(updated)
+      return updated
     })
   }, [saveLayout])
 
@@ -744,6 +803,7 @@ export function LayoutCanvas({ document, onSave }: Props) {
                 onCompleteLink={handleCompleteLink}
                 onDoubleClickGuide={handleDeleteGuide}
                 onContextMenu={handleContextMenu}
+                onAIAction={onAIAction}
                 scale={scale}
               />
             ))}
@@ -756,6 +816,7 @@ export function LayoutCanvas({ document, onSave }: Props) {
         <div className="flex border-b border-slate-700 shrink-0">
           {([
             { id: 'props',    label: 'Props',    emoji: '⚙' },
+            { id: 'styles',   label: 'Estilos',  emoji: 'Aa' },
             { id: 'preflight',label: 'Check',    emoji: preflightReport.status === 'ok' ? '✓' : '⚠' },
             { id: 'layers',   label: 'Capas',    emoji: '◫' },
             { id: 'masters',  label: 'Master',   emoji: '📋' },
@@ -769,7 +830,16 @@ export function LayoutCanvas({ document, onSave }: Props) {
 
         <div className="flex-1 overflow-y-auto">
           {rightPanelTab === 'props' && (
-            <LayoutPropertiesPanel frame={selectedFrame} onUpdate={handleUpdateFrame} onUnlink={handleUnlink} />
+            <LayoutPropertiesPanel
+              frame={selectedFrame}
+              styles={paragraphStyles}
+              onUpdate={handleUpdateFrame}
+              onUnlink={handleUnlink}
+              onApplyStyle={handleApplyStyle}
+            />
+          )}
+          {rightPanelTab === 'styles' && (
+            <StylesPanel styles={paragraphStyles} onUpdate={handleUpdateStyles} />
           )}
           {rightPanelTab === 'preflight' && (
             <div className="p-3">

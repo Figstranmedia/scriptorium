@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react'
 interface Props { store: any }
 
 export function SettingsModal({ store }: Props) {
-  const [provider, setProvider] = useState<'claude' | 'ollama'>('claude')
+  const [provider, setProvider] = useState<'claude' | 'ollama'>('ollama')
   const [apiKey, setApiKey] = useState('')
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434')
   const [ollamaModel, setOllamaModel] = useState('llama3')
@@ -13,10 +13,26 @@ export function SettingsModal({ store }: Props) {
 
   useEffect(() => {
     window.api.getSettings().then((s: any) => {
-      setProvider(s.aiProvider || 'claude')
+      const savedProvider = s.aiProvider || 'ollama'
+      setProvider(savedProvider)
       setApiKey(s.anthropicApiKey || '')
       setOllamaUrl(s.ollamaUrl || 'http://localhost:11434')
       setOllamaModel(s.ollamaModel || 'llama3')
+      // Auto-check Ollama if it's the active provider
+      if (savedProvider === 'ollama') {
+        setOllamaStatus('checking')
+        window.api.ollamaListModels().then((res: any) => {
+          if (res.error) {
+            setOllamaStatus('error')
+          } else {
+            setAvailableModels(res.models || [])
+            setOllamaStatus('ok')
+            if (res.models?.length > 0) {
+              setOllamaModel((prev: string) => res.models.includes(prev) ? prev : res.models[0])
+            }
+          }
+        })
+      }
     })
   }, [])
 

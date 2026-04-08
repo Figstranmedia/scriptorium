@@ -61,7 +61,7 @@ app.on('window-all-closed', () => {
 // ─── IPC: Settings ───────────────────────────────────────────────────────────
 ipcMain.handle('store:get-settings', () => ({
   anthropicApiKey: store.get('anthropicApiKey', '') as string,
-  aiProvider: store.get('aiProvider', 'claude') as string,
+  aiProvider: store.get('aiProvider', 'ollama') as string,
   ollamaModel: store.get('ollamaModel', 'llama3') as string,
   ollamaUrl: store.get('ollamaUrl', 'http://localhost:11434') as string,
 }))
@@ -202,6 +202,28 @@ ipcMain.handle('ollama:list-models', async () => {
     return { models: json.models.map((m) => m.name) }
   } catch {
     return { error: 'Ollama no disponible en ' + ollamaUrl }
+  }
+})
+
+// ─── IPC: Ollama autodetect ───────────────────────────────────────────────────
+// Called on startup — silently detects Ollama and picks the first available model
+ipcMain.handle('ollama:autodetect', async () => {
+  const ollamaUrl = store.get('ollamaUrl', 'http://localhost:11434') as string
+  try {
+    const res = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return { available: false }
+    const json = await res.json() as { models: { name: string }[] }
+    const models = json.models.map((m) => m.name)
+    if (models.length === 0) return { available: true, models: [] }
+    // Auto-select first model if none saved yet
+    const currentModel = store.get('ollamaModel', '') as string
+    if (!currentModel || !models.includes(currentModel)) {
+      store.set('ollamaModel', models[0])
+    }
+    store.set('aiProvider', 'ollama')
+    return { available: true, models, activeModel: store.get('ollamaModel') as string }
+  } catch {
+    return { available: false }
   }
 })
 
