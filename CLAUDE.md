@@ -93,21 +93,33 @@ interface Guide { id, axis: 'h'|'v', position: number }  // in page pixels
 getSettings() / setSettings(s)
 // Documents
 saveDocument(id, data) / loadDocuments() / deleteDocument(id)
+saveDocumentAs(title, data)     → { filePath?, canceled?, error? }
+saveDocumentToPath(path, data)  → { success?, error? }
 // Files
 pickImage()        → base64 data URL
 importPDF()        → { data: base64, name: string }
 // Fonts
 listFonts()        → string[]   (all system-installed font names)
-// Export
-exportPDF(html, title)
-// AI
+// Export — Write mode
+exportPDF(html, title)          → { success?, canceled?, error?, filePath? }
+// Export — Layout mode (BLOQUE 8)
+exportLayoutPDF(html, title)    → { success?, canceled?, error?, filePath? }
+exportPNGPages(pages, title)    → { success?, canceled?, error?, paths?, count? }
+  pages: Array<{ html: string; widthPx: number; heightPx: number }>
+// AI — Conversational chat
+aiChat(messages, docContext)    → { result?, thinking?, error? }  // Claude extended thinking
+aiSummarizeChat(messages, title) → { result?, error? }
+// AI — One-shot actions
 aiResearch(text, ctx)
 aiSuggest(text, ctx)
 aiRestructure(text, docType)
 aiReplace(text, instruction, ctx)
-aiDesign(instruction, frameProps)  → { changes: Partial<LayoutFrame> }
+aiDesign(instruction, frameProps) → { changes: Partial<LayoutFrame> }
 // Ollama
-ollamaListModels()
+ollamaListModels() / ollamaAutodetect()
+// Project folder
+projectSaveFolder(title, data, investigacionMd, existingPath?) → { folderPath?, scptPath?, mdPath?, ... }
+projectUpdateMd(folderPath, content) → { success?, error? }
 ```
 
 ## AI provider config
@@ -147,10 +159,39 @@ Store keys: `aiProvider` ('claude'|'ollama'), `anthropicApiKey`, `ollamaModel`, 
 - ✅ Page strip (thumbnails), context menu, layers panel
 - ✅ Master pages, preflight, baseline grid
 - ✅ PDF import (pdfjs-dist, detects text blocks + font sizes)
+- ✅ PDF drag-and-drop onto DocSidebar (via global `window.__triggerPDFImportWithData`)
 - ✅ PDF export (Electron printToPDF), bibliography (APA/MLA/Chicago/IEEE)
+- ✅ Book cover mode (CoverCanvas: tapa + lomo + contraportada, bleed/spine/safe-area overlays)
+- ✅ AI conversational sidebar: chat, extended thinking display, auto-compression → investigacion.md
+- ✅ Project folder system: ~/Documents/Scriptorium/{title}/ with .scpt + .md + imagenes/
+- ✅ Guardar / Guardar como (⌘S / ⌘⇧S) — saves to user-chosen .scriptorium file path
+- ✅ Collapsible sidebars (DocSidebar + AISidebar)
+- ✅ Per-character typography in text frames (TipTap FontSize/FontFamily/Color extensions)
+- ✅ Affinity-style floating toolbar when editing text frames
+- ✅ BLOQUE 8: Layout → PDF export, PNG per-page export, crop marks / bleed control
 
-## Pending (from CLAUDE_PROMPT.md — implement in order)
-1. **Block 3** — Global paragraph styles (named styles like "Body", "Chapter Title")
-2. **Block 2** — Book cover mode (tapa + lomo + contraportada as single spread)
-3. **Block 6.1** — Shape tool (rectangle, line, ellipse frames)
-4. **Block 8** — Enhanced export (bleed marks, PNG export per page)
+## Export architecture (BLOQUE 8 — added 2026-04-08)
+Two export paths live in `src/renderer/src/lib/printHTML.ts`:
+
+1. **Write mode** (`generatePrintHTML`): HTML → hidden window → `printToPDF`. Classic flow.
+2. **Layout mode** (`generateLayoutPrintHTML`): converts `doc.layoutFrames` to absolutely-positioned
+   divs in mm units (px→mm via `pxToMm = px*25.4/96`), optional bleed box + crop marks.
+   Rendered via `export:layout-pdf` IPC handler.
+3. **PNG per page** (`export:png-pages`): one `BrowserWindow` per page (sized to page pixels),
+   `capturePage()` → `toPNG()` → saved as `{base}_p01.png`, `{base}_p02.png`, etc.
+
+`ExportModal` auto-selects "Maquetación" tab when `doc.layoutFrames.length > 0`.
+
+## Known limitations / future work
+- Layout PNG export: 1 window per page, ~1s delay each → slow for many pages.
+  Future: use pdfjs-dist to render PDF pages to canvas instead.
+- Threaded text frames: export uses `frame.ownContent` only — distributed/threaded content
+  from `threadEngine.distributeContent()` is not captured at export time. Fix: snapshot
+  `contentMap` into each frame at save time, or run distributeContent at export time.
+- BLOQUE 6.1 (shape frames: rect/line/ellipse) — NOT yet implemented
+- Release & documentation — NOT yet done
+
+## Pending
+1. **BLOQUE 6.1** — Shape tool (rectangle, line, ellipse as decorative frames)
+2. **Release v1.0** — README update, CHANGELOG, version bump, GitHub release
+3. **BLOQUE IMPORT-MEJORADA** — Word/DOCX import (mammoth.js), PDF image extraction
