@@ -1,6 +1,6 @@
 import React from 'react'
-import type { LayoutFrame, LayoutImageFrame, AnyLayoutFrame } from '../../lib/threadEngine'
-import { isImageFrame } from '../../lib/threadEngine'
+import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, AnyLayoutFrame } from '../../lib/threadEngine'
+import { isImageFrame, isShapeFrame } from '../../lib/threadEngine'
 import { FontPicker } from './FontPicker'
 import type { ParagraphStyle } from '../../store/useStore'
 
@@ -65,6 +65,64 @@ export function LayoutPropertiesPanel({ frame, styles = [], onUpdate, onUnlink, 
   }
 
   const upd = (updates: Partial<AnyLayoutFrame>) => onUpdate(frame.id, updates)
+
+  if (isShapeFrame(frame)) {
+    const sf = frame as LayoutShapeFrame
+    const shapeLabel = sf.shapeType === 'rect' ? '▭ Rectángulo' : sf.shapeType === 'ellipse' ? '◯ Elipse' : '╱ Línea'
+    return (
+      <div className="p-3 space-y-3 overflow-y-auto">
+        <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">{shapeLabel}</p>
+
+        {/* Shape type selector */}
+        <div>
+          <label className="text-[10px] text-slate-400 font-sans block mb-1">Tipo de forma</label>
+          <div className="flex gap-1">
+            {(['rect', 'ellipse', 'line'] as const).map(t => (
+              <button key={t} onClick={() => upd({ shapeType: t } as Partial<LayoutShapeFrame>)}
+                className={`flex-1 py-1 rounded text-[10px] font-sans border transition ${sf.shapeType === t ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400'}`}>
+                {t === 'rect' ? '▭' : t === 'ellipse' ? '◯' : '╱'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <NumField label="X" value={sf.x} min={0} max={2000} onChange={v => upd({ x: v })} />
+        <NumField label="Y" value={sf.y} min={0} max={3000} onChange={v => upd({ y: v })} />
+        <NumField label="Ancho" value={sf.width} min={10} max={2000} onChange={v => upd({ width: v })} />
+        {sf.shapeType !== 'line' && (
+          <NumField label="Alto" value={sf.height} min={10} max={3000} onChange={v => upd({ height: v })} />
+        )}
+
+        <ColorField label="Relleno" value={sf.fillColor || 'transparent'}
+          onChange={v => upd({ fillColor: v } as Partial<LayoutShapeFrame>)} />
+        <ColorField label="Borde" value={sf.strokeColor || '#64748b'}
+          onChange={v => upd({ strokeColor: v } as Partial<LayoutShapeFrame>)} />
+        <NumField label="Grosor borde" value={sf.strokeWidth} min={0} max={20} step={0.5}
+          onChange={v => upd({ strokeWidth: v } as Partial<LayoutShapeFrame>)} />
+
+        <div>
+          <label className="text-[10px] text-slate-400 font-sans block mb-1">Estilo de borde</label>
+          <div className="flex gap-1">
+            {(['solid', 'dashed', 'dotted'] as const).map(s => (
+              <button key={s} onClick={() => upd({ strokeStyle: s } as Partial<LayoutShapeFrame>)}
+                className={`flex-1 py-1 rounded text-[10px] font-sans border transition ${sf.strokeStyle === s ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400'}`}>
+                {s === 'solid' ? '—' : s === 'dashed' ? '- -' : '···'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {sf.shapeType === 'rect' && (
+          <NumField label="Radio esquina" value={sf.cornerRadius} min={0} max={200}
+            onChange={v => upd({ cornerRadius: v } as Partial<LayoutShapeFrame>)} />
+        )}
+        <NumField label="Opacidad" value={sf.opacity * 100} min={0} max={100}
+          onChange={v => upd({ opacity: v / 100 } as Partial<LayoutShapeFrame>)} />
+        <NumField label="Z-index" value={sf.zIndex} min={0} max={100}
+          onChange={v => upd({ zIndex: v } as Partial<LayoutShapeFrame>)} />
+      </div>
+    )
+  }
 
   if (isImageFrame(frame)) {
     const imgF = frame as LayoutImageFrame

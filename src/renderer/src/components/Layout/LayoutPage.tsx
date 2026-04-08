@@ -1,8 +1,9 @@
 import React, { useRef, useState } from 'react'
-import type { LayoutFrame, LayoutImageFrame, AnyLayoutFrame } from '../../lib/threadEngine'
-import { isImageFrame } from '../../lib/threadEngine'
+import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, AnyLayoutFrame } from '../../lib/threadEngine'
+import { isImageFrame, isShapeFrame } from '../../lib/threadEngine'
 import { LayoutTextFrameComp } from './LayoutTextFrame'
 import { LayoutImageFrameComp } from './LayoutImageFrame'
+import { LayoutShapeFrameComp } from './LayoutShapeFrame'
 import type { Guide } from '../../store/useStore'
 
 export interface PageSize {
@@ -22,7 +23,7 @@ export function mmToPx(mm: number): number {
   return (mm / 25.4) * 96
 }
 
-export type DrawMode = 'pointer' | 'draw-text' | 'draw-image'
+export type DrawMode = 'pointer' | 'draw-text' | 'draw-image' | 'draw-rect' | 'draw-ellipse' | 'draw-line'
 
 interface DrawRect { x: number; y: number; w: number; h: number }
 
@@ -44,6 +45,7 @@ interface Props {
   onDeleteFrame: (id: string) => void
   onAddTextFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
   onAddImageFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
+  onAddShapeFrame: (pageIndex: number, x: number, y: number, shapeType: 'rect' | 'ellipse' | 'line', w?: number, h?: number) => void
   onStartLink: (id: string) => void
   onCompleteLink: (targetId: string) => void
   onDoubleClickGuide?: (guideId: string) => void
@@ -57,7 +59,7 @@ export function LayoutPage({
   selectedFrameIds, showBaselineGrid, baselineGridStep,
   linkingFrom, drawMode, guides, snapLines = [],
   onSelectFrame, onSelectFramesByRect, onUpdateFrame, onDeleteFrame,
-  onAddTextFrame, onAddImageFrame, onStartLink, onCompleteLink,
+  onAddTextFrame, onAddImageFrame, onAddShapeFrame, onStartLink, onCompleteLink,
   onDoubleClickGuide, onContextMenu, onAIAction, scale,
 }: Props) {
   const pageRef = useRef<HTMLDivElement>(null)
@@ -85,7 +87,7 @@ export function LayoutPage({
     if ((e.target as HTMLElement) !== pageRef.current) return
     const { x, y } = getPageXY(e)
 
-    if (drawMode === 'draw-text' || drawMode === 'draw-image') {
+    if (drawMode === 'draw-text' || drawMode === 'draw-image' || drawMode === 'draw-rect' || drawMode === 'draw-ellipse' || drawMode === 'draw-line') {
       e.preventDefault()
       drawStart.current = { x, y }
       setDrawRect({ x, y, w: 0, h: 0 })
@@ -111,9 +113,12 @@ export function LayoutPage({
   const handleMouseUp = (e: React.MouseEvent) => {
     if (drawStart.current && drawRect) {
       const w = Math.max(60, drawRect.w); const h = Math.max(40, drawRect.h)
-      if (w > 10 && h > 10) {
+      if (w > 10 || (drawMode === 'draw-line' && w > 10)) {
         if (drawMode === 'draw-text') onAddTextFrame(pageIndex, drawRect.x, drawRect.y, w, h)
         else if (drawMode === 'draw-image') onAddImageFrame(pageIndex, drawRect.x, drawRect.y, w, h)
+        else if (drawMode === 'draw-rect') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'rect', w, Math.max(20, h))
+        else if (drawMode === 'draw-ellipse') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'ellipse', w, Math.max(20, h))
+        else if (drawMode === 'draw-line') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'line', w, 2)
       }
       drawStart.current = null; setDrawRect(null); e.stopPropagation()
     }
@@ -152,7 +157,8 @@ export function LayoutPage({
     }
   }
 
-  const pageCursor = drawMode !== 'pointer' ? 'crosshair' : linkingFrom ? 'crosshair' : 'default'
+  const isDrawing = drawMode !== 'pointer'
+  const pageCursor = isDrawing ? 'crosshair' : linkingFrom ? 'crosshair' : 'default'
 
   return (
     <div className="flex flex-col items-center mb-12">
@@ -216,6 +222,20 @@ export function LayoutPage({
 
         {/* Frames */}
         {pageFrames.map(frame => {
+          if (isShapeFrame(frame)) {
+            return (
+              <LayoutShapeFrameComp
+                key={frame.id}
+                frame={frame as LayoutShapeFrame}
+                isSelected={selectedFrameIds.includes(frame.id)}
+                onSelect={(add) => onSelectFrame(frame.id, add)}
+                onUpdate={(updates) => onUpdateFrame(frame.id, updates)}
+                onDelete={() => onDeleteFrame(frame.id)}
+                onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, frame.id) }}
+                scale={scale}
+              />
+            )
+          }
           if (isImageFrame(frame)) {
             return (
               <LayoutImageFrameComp

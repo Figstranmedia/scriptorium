@@ -62,7 +62,25 @@ export interface LayoutImageFrame {
   borderWidth: number
 }
 
-export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame
+export interface LayoutShapeFrame {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  pageIndex: number
+  shapeType: 'rect' | 'ellipse' | 'line'
+  fillColor: string
+  strokeColor: string
+  strokeWidth: number
+  strokeStyle: 'solid' | 'dashed' | 'dotted'
+  cornerRadius: number
+  opacity: number
+  zIndex: number
+  locked: boolean
+}
+
+export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame | LayoutShapeFrame
 
 export interface ThreadResult {
   frameId: string
@@ -286,7 +304,40 @@ export function createDefaultImageFrame(
   }
 }
 
-// ── Type guard ────────────────────────────────────────────────────────────────
+let _shapeCounter = 0
+
+export function createDefaultShapeFrame(
+  pageIndex: number,
+  x: number,
+  y: number,
+  shapeType: 'rect' | 'ellipse' | 'line' = 'rect',
+  partial?: Partial<LayoutShapeFrame>,
+): LayoutShapeFrame {
+  _shapeCounter++
+  return {
+    id: `lsf_${Date.now()}_${_shapeCounter}`,
+    x, y,
+    width: 200,
+    height: shapeType === 'line' ? 2 : 150,
+    pageIndex,
+    shapeType,
+    fillColor: shapeType === 'line' ? 'transparent' : '#e2e8f0',
+    strokeColor: '#64748b',
+    strokeWidth: shapeType === 'line' ? 2 : 1,
+    strokeStyle: 'solid',
+    cornerRadius: 0,
+    opacity: 1,
+    zIndex: 10,
+    locked: false,
+    ...partial,
+  }
+}
+
+// ── Type guards ───────────────────────────────────────────────────────────────
 export function isImageFrame(f: AnyLayoutFrame): f is LayoutImageFrame {
   return 'src' in f
+}
+
+export function isShapeFrame(f: AnyLayoutFrame): f is LayoutShapeFrame {
+  return 'shapeType' in f
 }

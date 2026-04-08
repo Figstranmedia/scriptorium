@@ -1,6 +1,6 @@
 import type { Document, CitationStyle } from '../store/useStore'
-import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame } from './threadEngine'
-import { isImageFrame } from './threadEngine'
+import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } from './threadEngine'
+import { isImageFrame, isShapeFrame } from './threadEngine'
 import { formatReference } from './citations'
 
 export interface PDFOptions {
@@ -47,12 +47,39 @@ function resolveFont(family: string): string {
   return `"${family}", Georgia, serif`
 }
 
+const DASH_ARRAY: Record<string, string> = {
+  solid: '',
+  dashed: '8,4',
+  dotted: '2,4',
+}
+
 function frameToHTML(f: AnyLayoutFrame): string {
   const xMm  = pxToMm(f.x).toFixed(3)
   const yMm  = pxToMm(f.y).toFixed(3)
   const wMm  = pxToMm(f.width).toFixed(3)
   const hMm  = pxToMm(f.height).toFixed(3)
   const rMm  = pxToMm(f.cornerRadius ?? 0).toFixed(3)
+
+  if (isShapeFrame(f)) {
+    const sf = f as LayoutShapeFrame
+    const w = pxToMm(sf.width)
+    const h = pxToMm(sf.height)
+    const sw = pxToMm(sf.strokeWidth)
+    const da = DASH_ARRAY[sf.strokeStyle] || ''
+    const dashAttr = da ? ` stroke-dasharray="${da}"` : ''
+    let inner = ''
+
+    if (sf.shapeType === 'rect') {
+      const rx = pxToMm(sf.cornerRadius ?? 0)
+      inner = `<rect x="${(sw/2).toFixed(3)}" y="${(sw/2).toFixed(3)}" width="${Math.max(0,w-sw).toFixed(3)}" height="${Math.max(0,h-sw).toFixed(3)}" fill="${sf.fillColor||'transparent'}" stroke="${sf.strokeColor||'none'}" stroke-width="${sw.toFixed(3)}" rx="${rx.toFixed(3)}"${dashAttr}/>`
+    } else if (sf.shapeType === 'ellipse') {
+      inner = `<ellipse cx="${(w/2).toFixed(3)}" cy="${(h/2).toFixed(3)}" rx="${Math.max(0,(w-sw)/2).toFixed(3)}" ry="${Math.max(0,(h-sw)/2).toFixed(3)}" fill="${sf.fillColor||'transparent'}" stroke="${sf.strokeColor||'none'}" stroke-width="${sw.toFixed(3)}"${dashAttr}/>`
+    } else {
+      inner = `<line x1="0" y1="${(h/2).toFixed(3)}" x2="${w.toFixed(3)}" y2="${(h/2).toFixed(3)}" stroke="${sf.strokeColor||'#64748b'}" stroke-width="${sw.toFixed(3)}"${dashAttr}/>`
+    }
+
+    return `<div style="position:absolute;left:${xMm}mm;top:${yMm}mm;width:${wMm}mm;height:${hMm}mm;opacity:${sf.opacity};"><svg xmlns="http://www.w3.org/2000/svg" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" overflow="visible">${inner}</svg></div>`
+  }
 
   if (isImageFrame(f)) {
     const img = f as LayoutImageFrame

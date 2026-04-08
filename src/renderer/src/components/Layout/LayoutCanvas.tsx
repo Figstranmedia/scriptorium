@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame } from '../../lib/threadEngine'
+import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } from '../../lib/threadEngine'
 import {
-  createDefaultFrame, createDefaultImageFrame, distributeContent, isImageFrame
+  createDefaultFrame, createDefaultImageFrame, createDefaultShapeFrame,
+  distributeContent, isImageFrame, isShapeFrame
 } from '../../lib/threadEngine'
 import { LayoutPage, PAGE_SIZES, mmToPx, type PageSize, type DrawMode } from './LayoutPage'
 import { LayoutPropertiesPanel } from './LayoutPropertiesPanel'
@@ -17,6 +18,7 @@ import { snapPosition } from '../../lib/snap'
 import type { Document, Guide, ParagraphStyle } from '../../store/useStore'
 import { DEFAULT_PARAGRAPH_STYLES } from '../../store/useStore'
 import { StylesPanel } from './StylesPanel'
+import { CoverCanvas } from './CoverCanvas'
 
 interface Props {
   document: Document
@@ -27,6 +29,11 @@ interface Props {
 const MAX_HISTORY = 50
 
 export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
+  // Cover documents get their own specialized canvas
+  if (document.docType === 'cover' && document.coverConfig) {
+    return <CoverCanvas document={document} onSave={onSave} onAIAction={onAIAction} />
+  }
+
   const [frames, setFrames] = useState<AnyLayoutFrame[]>(document.layoutFrames || [])
   const [pageCount, setPageCount] = useState<number>(Math.max(1, document.layoutPageCount || 1))
   const [pageSizeKey, setPageSizeKey] = useState<string>(document.layoutPageSize || 'A4')
@@ -52,6 +59,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const [clipboard, setClipboard] = useState<AnyLayoutFrame[]>([])
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showAIDesign, setShowAIDesign] = useState(false)
+  const [spreadPages, setSpreadPages] = useState<number[]>((document as any).layoutSpreadPages || [])
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Undo/Redo history
@@ -180,6 +188,24 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     const frame = createDefaultImageFrame(pageIndex, x ?? 60, y ?? 60)
     if (w) frame.width = w
     if (h) frame.height = h
+    setFrames(prev => {
+      const next = [...prev, frame]
+      pushHistory(next)
+      saveLayout(next)
+      return next
+    })
+    setSelectedFrameIds([frame.id])
+    setDrawMode('pointer')
+  }, [saveLayout, pushHistory])
+
+  const handleAddShapeFrame = useCallback((
+    pageIndex: number, x: number, y: number,
+    shapeType: 'rect' | 'ellipse' | 'line', w?: number, h?: number
+  ) => {
+    const frame = createDefaultShapeFrame(pageIndex, x, y, shapeType, {
+      width: w ?? 200,
+      height: h ?? (shapeType === 'line' ? 2 : 150),
+    })
     setFrames(prev => {
       const next = [...prev, frame]
       pushHistory(next)
@@ -482,12 +508,9 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   }, [pageSize, scale])
 
   // ── PDF Import ───────────────────────────────────────────────────────────────
-  const handleImportPDF = useCallback(async () => {
+  const applyPDFImport = useCallback(async (data: string, name: string) => {
     setImporting(true)
     try {
-      const result = await window.api.importPDF()
-      if (!result) return
-      const { data, name } = result
       const parsed = await parsePDF(data)
       const newPageSizeKey = parsed.pageSizeName
       const newPageSize = PAGE_SIZES[newPageSizeKey] || PAGE_SIZES.A4
@@ -518,6 +541,18 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       setImporting(false)
     }
   }, [pageCount, saveLayout, pushHistory])
+
+  const handleImportPDF = useCallback(async () => {
+    const result = await window.api.importPDF()
+    if (!result) return
+    await applyPDFImport(result.data, result.name)
+  }, [applyPDFImport])
+
+  // Expose for drag-and-drop from DocSidebar
+  useEffect(() => {
+    (window as any).__triggerPDFImportWithData = applyPDFImport
+    return () => { delete (window as any).__triggerPDFImportWithData }
+  }, [applyPDFImport])
 
   // ── Context menu ─────────────────────────────────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent, frameId: string | null) => {
@@ -592,6 +627,9 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       // Draw mode shortcuts
       if (e.key === 't' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-text' ? 'pointer' : 'draw-text'); return }
       if (e.key === 'i' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-image' ? 'pointer' : 'draw-image'); return }
+      if (e.key === 'r' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-rect' ? 'pointer' : 'draw-rect'); return }
+      if (e.key === 'e' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-ellipse' ? 'pointer' : 'draw-ellipse'); return }
+      if (e.key === 'l' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-line' ? 'pointer' : 'draw-line'); return }
       if (e.key === 's' && !e.metaKey && !e.ctrlKey) { setSnapEnabled(v => !v); return }
 
       // Zoom
@@ -634,7 +672,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const selectedFrame = frames.find(f => f.id === selectedFrameId) || null
 
   return (
-    <div className="flex flex-1 overflow-hidden bg-slate-700" style={{ position: 'relative' }}>
+    <div className="flex flex-1 overflow-hidden" style={{ position: 'relative', background: '#3a3a3e' }}>
 
       {/* Page strip (left) */}
       <PageStrip
@@ -642,58 +680,83 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         pageSize={pageSize}
         frames={frames}
         activePageIndex={activePageIndex}
+        spreadPages={spreadPages}
         onScrollToPage={scrollToPage}
         onAddPage={handleAddPage}
         onDeletePage={handleDeletePage}
+        onToggleSpread={(idx) => setSpreadPages(prev =>
+          prev.includes(idx) ? prev.filter(p => p !== idx) : [...prev, idx].sort((a,b) => a-b)
+        )}
       />
 
       {/* Main canvas area */}
       <div className="flex flex-col flex-1 overflow-hidden">
 
         {/* Toolbar */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border-b border-slate-700 text-xs font-sans flex-wrap shrink-0" style={{ zIndex: 30 }}>
+        <div className="flex items-center gap-1.5 px-2.5 py-1 border-b text-xs font-sans flex-wrap shrink-0"
+          style={{ background: '#222226', borderColor: 'rgba(255,255,255,0.06)', zIndex: 30 }}>
 
           {/* Draw mode tools */}
-          <div className="flex items-center gap-0.5 bg-slate-700 rounded p-0.5">
+          <div className="flex items-center gap-px rounded p-0.5" style={{ background: 'rgba(255,255,255,0.06)' }}>
             <button onClick={() => setDrawMode('pointer')}
-              className={`px-2 py-1 rounded text-xs transition ${drawMode === 'pointer' ? 'bg-slate-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'pointer' ? 'rgba(255,255,255,0.15)' : 'transparent', color: drawMode === 'pointer' ? '#e4e4e6' : '#a0a0a8' }}
               title="Selección (Esc)">↖</button>
             <button onClick={() => setDrawMode('draw-text')}
-              className={`px-2 py-1 rounded text-xs transition font-bold ${drawMode === 'draw-text' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className="px-2 py-1 rounded text-xs transition font-bold"
+              style={{ background: drawMode === 'draw-text' ? '#2997ff' : 'transparent', color: drawMode === 'draw-text' ? '#fff' : '#a0a0a8' }}
               title="Marco de texto (T)">T</button>
             <button onClick={() => setDrawMode('draw-image')}
-              className={`px-2 py-1 rounded text-xs transition ${drawMode === 'draw-image' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'draw-image' ? '#7c3aed' : 'transparent', color: drawMode === 'draw-image' ? '#fff' : '#a0a0a8' }}
               title="Marco de imagen (I)">🖼</button>
+            <button onClick={() => setDrawMode(m => m === 'draw-rect' ? 'pointer' : 'draw-rect')}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'draw-rect' ? '#059669' : 'transparent', color: drawMode === 'draw-rect' ? '#fff' : '#a0a0a8' }}
+              title="Rectángulo (R)">▭</button>
+            <button onClick={() => setDrawMode(m => m === 'draw-ellipse' ? 'pointer' : 'draw-ellipse')}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'draw-ellipse' ? '#059669' : 'transparent', color: drawMode === 'draw-ellipse' ? '#fff' : '#a0a0a8' }}
+              title="Elipse (E)">◯</button>
+            <button onClick={() => setDrawMode(m => m === 'draw-line' ? 'pointer' : 'draw-line')}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'draw-line' ? '#059669' : 'transparent', color: drawMode === 'draw-line' ? '#fff' : '#a0a0a8' }}
+              title="Línea (L)">╱</button>
           </div>
 
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Undo/Redo */}
-          <button onClick={undo} className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition" title="Deshacer (⌘Z)">↩</button>
-          <button onClick={redo} className="px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition" title="Rehacer (⌘⇧Z)">↪</button>
+          <button onClick={undo} className="px-2 py-1 rounded text-xs transition"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }} title="Deshacer (⌘Z)">↩</button>
+          <button onClick={redo} className="px-2 py-1 rounded text-xs transition"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }} title="Rehacer (⌘⇧Z)">↪</button>
 
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Snap toggle */}
           <button onClick={() => setSnapEnabled(v => !v)}
-            className={`px-2 py-1 rounded text-xs transition ${snapEnabled ? 'bg-emerald-700 text-white' : 'bg-slate-700 text-slate-400'}`}
+            className="px-2 py-1 rounded text-xs transition"
+            style={{ background: snapEnabled ? 'rgba(34,197,94,0.2)' : 'rgba(255,255,255,0.06)', color: snapEnabled ? '#4ade80' : '#6e6e78' }}
             title="Snap magnético (S)">⊞ Snap</button>
 
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Page controls */}
           <select value={pageSizeKey}
             onChange={e => { setPageSizeKey(e.target.value); saveLayout(frames, pageCount, e.target.value) }}
-            className="bg-slate-700 text-slate-200 border border-slate-600 rounded px-2 py-1 text-xs">
+            className="rounded px-2 py-1 text-xs outline-none"
+            style={{ background: '#2c2c30', border: '1px solid rgba(255,255,255,0.1)', color: '#c8c8cc' }}>
             {Object.keys(PAGE_SIZES).map(k => <option key={k} value={k}>{k}</option>)}
           </select>
-          <span className="text-slate-400">{pageCount} pág.</span>
+          <span style={{ color: '#6e6e78', fontSize: 11 }}>{pageCount} pág.</span>
 
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* PDF Import */}
           <button onClick={handleImportPDF} disabled={importing}
-            className="px-2 py-1 rounded bg-emerald-700 hover:bg-emerald-600 text-white transition text-xs disabled:opacity-50"
+            className="px-2 py-1 rounded text-xs transition disabled:opacity-40"
+            style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}
             title="Importar PDF y detectar estructura">
             {importing ? '⏳ Importando…' : '⬆ PDF'}
           </button>
@@ -701,20 +764,26 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           {/* AI Design */}
           <button
             onClick={() => setShowAIDesign(v => !v)}
-            className={`px-2 py-1 rounded text-xs transition ${showAIDesign ? 'bg-violet-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+            className="px-2 py-1 rounded text-xs transition"
+            style={{ background: showAIDesign ? 'rgba(124,58,237,0.4)' : 'rgba(255,255,255,0.06)', color: showAIDesign ? '#c4b5fd' : '#a0a0a8' }}
             title="IA Diseño — modifica el marco seleccionado con IA"
           >✨ IA</button>
 
           {/* Linking / Draw mode hints */}
           {linkingFrom && (
-            <div className="px-3 py-1 rounded bg-indigo-500 text-white animate-pulse text-xs">
+            <div className="px-3 py-1 rounded text-white animate-pulse text-xs" style={{ background: '#4f46e5' }}>
               Clic en el marco destino →
               <button onClick={() => setLinkingFrom(null)} className="ml-2 underline">Cancelar</button>
             </div>
           )}
           {drawMode !== 'pointer' && !linkingFrom && (
-            <div className={`px-3 py-1 rounded text-white text-xs animate-pulse ${drawMode === 'draw-text' ? 'bg-blue-600' : 'bg-purple-600'}`}>
-              {drawMode === 'draw-text' ? 'Arrastra para crear marco de texto' : 'Arrastra para crear marco de imagen'}
+            <div className="px-3 py-1 rounded text-white text-xs animate-pulse"
+              style={{ background: drawMode === 'draw-text' ? '#2997ff' : drawMode === 'draw-image' ? '#7c3aed' : '#059669' }}>
+              {drawMode === 'draw-text' ? 'Arrastra para crear marco de texto'
+                : drawMode === 'draw-image' ? 'Arrastra para crear marco de imagen'
+                : drawMode === 'draw-rect' ? 'Arrastra para dibujar un rectángulo (R)'
+                : drawMode === 'draw-ellipse' ? 'Arrastra para dibujar una elipse (E)'
+                : 'Arrastra para dibujar una línea (L)'}
               <button onClick={() => setDrawMode('pointer')} className="ml-2 underline">Cancelar</button>
             </div>
           )}
@@ -722,8 +791,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           {/* Alignment toolbar (multi-select) */}
           {selectedFrameIds.length >= 2 && (
             <>
-              <div className="w-px h-4 bg-slate-600" />
-              <div className="flex gap-0.5 bg-slate-700 rounded p-0.5">
+              <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
+              <div className="flex gap-px rounded p-0.5" style={{ background: 'rgba(255,255,255,0.06)' }}>
                 {[
                   { k:'left', t:'Alinear izquierdas', i:'⬛' },
                   { k:'cx',   t:'Centrar horizontal', i:'⬜' },
@@ -735,7 +804,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                   { k:'distrib-v',t:'Distribuir V',   i:'↕' },
                 ].map(({ k, t, i }) => (
                   <button key={k} onClick={() => alignFrames(k)} title={t}
-                    className="px-1.5 py-1 rounded text-xs text-slate-300 hover:bg-slate-600 transition">{i}</button>
+                    className="px-1.5 py-1 rounded text-xs transition"
+                    style={{ color: '#a0a0a8' }}>{i}</button>
                 ))}
               </div>
             </>
@@ -744,25 +814,29 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           <div className="flex-1" />
 
           <PreflightBadge report={preflightReport} />
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Baseline grid */}
           <button onClick={() => setShowBaselineGrid(!showBaselineGrid)}
-            className={`px-2 py-1 rounded transition text-xs ${showBaselineGrid ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+            className="px-2 py-1 rounded transition text-xs"
+            style={{ background: showBaselineGrid ? 'rgba(99,102,241,0.3)' : 'rgba(255,255,255,0.06)', color: showBaselineGrid ? '#a5b4fc' : '#6e6e78' }}>
             ⊟ Grid
           </button>
           {showBaselineGrid && (
             <input type="number" min={8} max={40} value={baselineStep}
               onChange={e => setBaselineStep(Number(e.target.value))}
-              className="w-14 text-center bg-slate-700 text-slate-200 border border-slate-600 rounded px-1 py-0.5 text-xs" />
+              className="w-14 text-center rounded px-1 py-0.5 text-xs outline-none"
+              style={{ background: '#2c2c30', border: '1px solid rgba(255,255,255,0.1)', color: '#c8c8cc' }} />
           )}
 
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Zoom */}
-          <span className="text-slate-400 text-xs">{Math.round(scale * 100)}%</span>
-          <button onClick={() => setScale(s => Math.max(0.25, s - 0.1))} className="px-1.5 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 text-xs">−</button>
-          <button onClick={() => setScale(s => Math.min(4, s + 0.1))} className="px-1.5 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 text-xs">+</button>
+          <span style={{ color: '#6e6e78', fontSize: 11 }}>{Math.round(scale * 100)}%</span>
+          <button onClick={() => setScale(s => Math.max(0.25, s - 0.1))} className="px-1.5 py-1 rounded text-xs transition"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }}>−</button>
+          <button onClick={() => setScale(s => Math.min(4, s + 0.1))} className="px-1.5 py-1 rounded text-xs transition"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }}>+</button>
           {[0.5, 0.7, 1.0].map(z => (
             <button key={z} onClick={() => setScale(z)}
               className={`px-2 py-1 rounded text-xs transition ${Math.abs(scale - z) < 0.01 ? 'bg-slate-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
@@ -799,6 +873,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                 onDeleteFrame={(id) => handleDeleteFrame(id)}
                 onAddTextFrame={handleAddTextFrame}
                 onAddImageFrame={handleAddImageFrame}
+                onAddShapeFrame={handleAddShapeFrame}
                 onStartLink={handleStartLink}
                 onCompleteLink={handleCompleteLink}
                 onDoubleClickGuide={handleDeleteGuide}
