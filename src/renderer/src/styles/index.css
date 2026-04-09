@@ -211,6 +211,34 @@ html, body, #root {
   outline: 2px solid #d4522b;
 }
 
+/* ── KaTeX math nodes ── */
+.math-node {
+  display: inline-block;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 2px;
+  transition: background 0.15s;
+}
+.math-node:hover { background: rgba(212,82,43,0.1); }
+.math-node.selected { background: rgba(212,82,43,0.2); outline: 1px solid #d4522b; }
+
+.math-block-node {
+  display: block;
+  margin: 1.2em 0;
+  text-align: center;
+  cursor: pointer;
+  padding: 0.6em 1em;
+  border-radius: 4px;
+  border-left: 3px solid #d4522b;
+  background: rgba(212,82,43,0.04);
+  transition: background 0.15s;
+}
+.math-block-node:hover { background: rgba(212,82,43,0.08); }
+.math-block-node.selected { background: rgba(212,82,43,0.12); }
+
+.math-node .katex, .math-block-node .katex { font-size: 1em; }
+.math-node.error, .math-block-node.error { color: #ef4444; font-family: monospace; font-size: 0.85em; }
+
 /* ── Table styles ── */
 .ProseMirror table {
   border-collapse: collapse;

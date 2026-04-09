@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
+import { useEditor, EditorContent, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Highlight from '@tiptap/extension-highlight'
@@ -7,9 +7,170 @@ import TextAlign from '@tiptap/extension-text-align'
 import TextStyle from '@tiptap/extension-text-style'
 import FontFamily from '@tiptap/extension-font-family'
 import Color from '@tiptap/extension-color'
-import { Extension } from '@tiptap/core'
+import { Extension, Node, mergeAttributes } from '@tiptap/core'
+import katex from 'katex'
 import type { LayoutFrame } from '../../lib/threadEngine'
 import { resolveFontFamily } from '../../lib/fontUtils'
+
+// ─── KaTeX math extensions ────────────────────────────────────────────────────
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    mathInline: { insertMathInline: (latex: string) => ReturnType }
+    mathBlock:  { insertMathBlock:  (latex: string) => ReturnType }
+  }
+}
+
+function renderKaTeX(latex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(latex, { throwOnError: false, displayMode })
+  } catch {
+    return `<span style="color:#ef4444;font-family:monospace">${latex}</span>`
+  }
+}
+
+// Inline math node: $...$
+const MathInlineView = ({ node, editor, getPos, selected }: any) => {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(node.attrs.latex as string)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { if (editing) inputRef.current?.select() }, [editing])
+
+  const commit = () => {
+    if (typeof getPos === 'function') {
+      editor.chain().focus().setNodeSelection(getPos())
+        .updateAttributes('mathInline', { latex: draft }).run()
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <NodeViewWrapper as="span" style={{ display: 'inline-block', verticalAlign: 'middle' }}>
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onBlur={commit}
+          style={{
+            fontFamily: 'monospace', fontSize: 11, padding: '1px 6px',
+            background: '#1e1f21', color: '#e0e0e4', border: '1px solid #4f46e5',
+            borderRadius: 3, outline: 'none', minWidth: 60,
+          }}
+          onClick={e => e.stopPropagation()}
+        />
+        <span style={{ fontSize: 9, color: '#9ca3af', marginLeft: 4 }}>Enter para confirmar</span>
+      </NodeViewWrapper>
+    )
+  }
+
+  const html = renderKaTeX(node.attrs.latex, false)
+  return (
+    <NodeViewWrapper as="span"
+      className={`math-node${selected ? ' selected' : ''}`}
+      title="Doble clic para editar"
+      onDoubleClick={() => { setDraft(node.attrs.latex); setEditing(true) }}>
+      <span dangerouslySetInnerHTML={{ __html: html }} />
+    </NodeViewWrapper>
+  )
+}
+
+const MathInline = Node.create({
+  name: 'mathInline',
+  inline: true,
+  group: 'inline',
+  atom: true,
+  addAttributes() { return { latex: { default: '' } } },
+  parseHTML() { return [{ tag: 'span[data-math]' }] },
+  renderHTML({ node, HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { 'data-math': '', 'data-latex': node.attrs.latex }),
+      renderKaTeX(node.attrs.latex, false)]
+  },
+  addNodeView() { return ReactNodeViewRenderer(MathInlineView) },
+  addCommands() {
+    return {
+      insertMathInline: (latex: string) => ({ commands }) =>
+        commands.insertContent({ type: 'mathInline', attrs: { latex } }),
+    }
+  },
+})
+
+// Block math node: $$...$$
+const MathBlockView = ({ node, editor, getPos, selected }: any) => {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(node.attrs.latex as string)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => { if (editing) taRef.current?.select() }, [editing])
+
+  const commit = () => {
+    if (typeof getPos === 'function') {
+      editor.chain().focus().setNodeSelection(getPos())
+        .updateAttributes('mathBlock', { latex: draft }).run()
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <NodeViewWrapper>
+        <div style={{ margin: '0.8em 0', padding: '0.5em 1em', background: '#1e1f21', borderRadius: 6, border: '1px solid #4f46e5' }}>
+          <textarea
+            ref={taRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); commit() } if (e.key === 'Escape') setEditing(false) }}
+            rows={3}
+            style={{
+              width: '100%', fontFamily: 'monospace', fontSize: 12, padding: 6,
+              background: '#2a2b2d', color: '#e0e0e4', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4, outline: 'none', resize: 'vertical',
+            }}
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <span style={{ fontSize: 10, color: '#9ca3af', flex: 1 }}>Preview:</span>
+            <button onMouseDown={e => e.preventDefault()} onClick={commit}
+              style={{ fontSize: 10, padding: '2px 10px', background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 3, cursor: 'pointer' }}>
+              ✓ Confirmar (⇧Enter)
+            </button>
+          </div>
+          <div style={{ textAlign: 'center', padding: '4px 0', minHeight: 28 }}
+               dangerouslySetInnerHTML={{ __html: renderKaTeX(draft, true) }} />
+        </div>
+      </NodeViewWrapper>
+    )
+  }
+
+  const html = renderKaTeX(node.attrs.latex, true)
+  return (
+    <NodeViewWrapper>
+      <div className={`math-block-node${selected ? ' selected' : ''}`}
+           title="Doble clic para editar"
+           onDoubleClick={() => { setDraft(node.attrs.latex); setEditing(true) }}
+           dangerouslySetInnerHTML={{ __html: html }} />
+    </NodeViewWrapper>
+  )
+}
+
+const MathBlock = Node.create({
+  name: 'mathBlock',
+  group: 'block',
+  atom: true,
+  addAttributes() { return { latex: { default: '' } } },
+  parseHTML() { return [{ tag: 'div[data-math-block]' }] },
+  renderHTML({ node, HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-math-block': '', 'data-latex': node.attrs.latex }),
+      renderKaTeX(node.attrs.latex, true)]
+  },
+  addNodeView() { return ReactNodeViewRenderer(MathBlockView) },
+  addCommands() {
+    return {
+      insertMathBlock: (latex: string) => ({ commands }) =>
+        commands.insertContent({ type: 'mathBlock', attrs: { latex } }),
+    }
+  },
+})
 
 // ─── Custom FontSize extension ────────────────────────────────────────────────
 declare module '@tiptap/core' {
@@ -74,6 +235,10 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
   const [currentColor, setCurrentColor] = useState(frame.textColor || '#1a1714')
   const fontListRef = useRef<HTMLDivElement>(null)
 
+  const [showMathModal, setShowMathModal] = useState(false)
+  const [mathMode, setMathMode] = useState<'inline' | 'block'>('inline')
+  const [mathDraft, setMathDraft] = useState('')
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -84,6 +249,8 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
       FontFamily,
       FontSize,
       Highlight.configure({ multicolor: true }),
+      MathInline,
+      MathBlock,
     ],
     content: frame.ownContent || '',
     autofocus: 'end',
@@ -325,6 +492,21 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
         {B(() => editor.chain().focus().toggleOrderedList().run(), isOrdered, 'Lista numerada',    '1.')}
         {B(() => editor.chain().focus().toggleBlockquote().run(), editor.isActive('blockquote'), 'Cita', '"')}
 
+        {/* Equations */}
+        {sep()}
+        <button
+          onMouseDown={e => e.preventDefault()}
+          onClick={e => { e.stopPropagation(); setMathMode('inline'); setMathDraft(''); setShowMathModal(true) }}
+          title="Ecuación inline (Alt+E)"
+          style={{ ...btnOff, fontFamily: 'serif', fontStyle: 'italic', fontSize: 13, padding: '2px 6px' }}
+        >Σ</button>
+        <button
+          onMouseDown={e => e.preventDefault()}
+          onClick={e => { e.stopPropagation(); setMathMode('block'); setMathDraft(''); setShowMathModal(true) }}
+          title="Ecuación bloque centrada"
+          style={{ ...btnOff, fontFamily: 'serif', fontStyle: 'italic', fontSize: 10, padding: '2px 5px' }}
+        >Σ₌</button>
+
         {/* AI actions */}
         {onAIAction && <>
           {sep()}
@@ -343,6 +525,133 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
           title="Salir de edición (Esc)"
         >✓ Listo</button>
       </div>
+
+      {/* ── Math insertion modal ── */}
+      {showMathModal && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onMouseDown={e => { e.stopPropagation(); setShowMathModal(false) }}
+        >
+          <div
+            style={{
+              background: '#1e1f22', border: '1px solid #3a3a40', borderRadius: 10,
+              padding: 20, width: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+            }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <span style={{ fontFamily: 'sans-serif', fontSize: 13, fontWeight: 600, color: '#e2e2e6' }}>
+                {mathMode === 'inline' ? 'Ecuación inline' : 'Ecuación bloque'}
+              </span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {(['inline', 'block'] as const).map(m => (
+                  <button key={m} onClick={() => setMathMode(m)}
+                    style={{
+                      fontSize: 10, padding: '2px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
+                      fontFamily: 'sans-serif',
+                      background: mathMode === m ? '#4f46e5' : 'rgba(255,255,255,0.08)',
+                      color: mathMode === m ? '#fff' : '#9ca3af',
+                    }}>
+                    {m === 'inline' ? 'Σ inline' : 'Σ bloque'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* LaTeX input */}
+            <textarea
+              autoFocus
+              value={mathDraft}
+              onChange={e => setMathDraft(e.target.value)}
+              placeholder={mathMode === 'inline'
+                ? 'e.g.  E = mc^2  o  \\frac{a}{b}'
+                : 'e.g.  \\int_0^\\infty x^2\\,dx  o  \\sum_{n=1}^{N} x_n'}
+              rows={3}
+              onKeyDown={e => {
+                if (e.key === 'Escape') { setShowMathModal(false); return }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  if (mathDraft.trim()) {
+                    if (mathMode === 'inline') editor?.chain().focus().insertMathInline(mathDraft.trim()).run()
+                    else editor?.chain().focus().insertMathBlock(mathDraft.trim()).run()
+                  }
+                  setShowMathModal(false)
+                }
+              }}
+              style={{
+                width: '100%', fontFamily: 'monospace', fontSize: 12, padding: 8,
+                background: '#2a2b2d', color: '#e0e0e4',
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
+                outline: 'none', resize: 'vertical',
+              }}
+            />
+
+            {/* Live preview */}
+            <div style={{ marginTop: 10, minHeight: 40, textAlign: mathMode === 'block' ? 'center' : 'left',
+                          padding: '8px 12px', background: 'rgba(255,255,255,0.03)',
+                          borderRadius: 6, border: '1px solid rgba(255,255,255,0.06)' }}>
+              {mathDraft.trim() ? (
+                <span dangerouslySetInnerHTML={{ __html: renderKaTeX(mathDraft, mathMode === 'block') }} />
+              ) : (
+                <span style={{ fontSize: 11, color: '#4b5563', fontFamily: 'sans-serif' }}>Preview en tiempo real…</span>
+              )}
+            </div>
+
+            {/* Quick reference */}
+            <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {[
+                ['\\frac{a}{b}', 'fracción'],
+                ['\\sqrt{x}', 'raíz'],
+                ['x^{2}', 'potencia'],
+                ['\\int_0^1', 'integral'],
+                ['\\sum_{n=1}^N', 'sumatoria'],
+                ['\\alpha \\beta \\gamma', 'griegas'],
+                ['\\vec{v}', 'vector'],
+                ['\\pm \\neq \\leq', 'símbolos'],
+              ].map(([latex, label]) => (
+                <button key={latex}
+                  onClick={() => setMathDraft(prev => prev ? prev + ' ' + latex : latex)}
+                  style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 3, border: 'none',
+                    background: 'rgba(255,255,255,0.06)', color: '#9ca3af',
+                    cursor: 'pointer', fontFamily: 'monospace',
+                  }}
+                  title={label}
+                >{latex}</button>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <button onClick={() => setShowMathModal(false)}
+                style={{ fontSize: 12, padding: '5px 14px', borderRadius: 6, border: 'none',
+                         background: 'transparent', color: '#6b7280', cursor: 'pointer', fontFamily: 'sans-serif' }}>
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (mathDraft.trim()) {
+                    if (mathMode === 'inline') editor?.chain().focus().insertMathInline(mathDraft.trim()).run()
+                    else editor?.chain().focus().insertMathBlock(mathDraft.trim()).run()
+                  }
+                  setShowMathModal(false)
+                }}
+                disabled={!mathDraft.trim()}
+                style={{
+                  fontSize: 12, padding: '5px 16px', borderRadius: 6, border: 'none',
+                  background: mathDraft.trim() ? '#4f46e5' : '#2a2a40',
+                  color: mathDraft.trim() ? '#fff' : '#4b5563',
+                  cursor: mathDraft.trim() ? 'pointer' : 'not-allowed', fontFamily: 'sans-serif', fontWeight: 600,
+                }}>
+                Insertar (Enter)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── TipTap editor content ── */}
       <div
