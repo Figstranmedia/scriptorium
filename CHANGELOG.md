@@ -7,6 +7,34 @@ All notable changes to Scriptorium are documented here.
 
 ---
 
+## [Unreleased] — v1.1 in progress
+
+### Added — BLOQUE 10: Data Charts (ECharts)
+- New **LayoutChartFrame** type: embed interactive charts in layout pages
+- Chart types: bar, line, area, pie, scatter
+- Inline chart editor (double-click): editable data table, multiple series, title, legend, grid, color palettes
+- 4 color palettes: Scriptorium, Pastel, Dark, Mono
+- Toolbar button 📊 and keyboard shortcut `C` to draw chart frames
+- SVG pre-render cache on each update for accurate PDF/PNG export
+- Properties panel: chart type selector, position, dimensions, opacity
+
+### Added — BLOQUE 13: SVG / Affinity Designer Export
+- New **SVG / Affinity** export format in the Export modal
+- Generates one `.svg` per page (`_p01.svg`, `_p02.svg`, …)
+- Shapes → native SVG (`<rect>`, `<ellipse>`, `<line>`) with stroke-dasharray
+- Images → `<image>` with `<clipPath>` for border-radius
+- Text → `<foreignObject>` with styled HTML (editable in Affinity)
+- Charts → embedded SVG from ECharts renderer
+- Exact mm dimensions — print-ready in Affinity Designer 2 / Affinity Publisher 2
+
+### Added — BLOQUE 9: KaTeX Equations
+- Inline (`$...$`) and block (`$$...$$`) math in layout text frames
+- Σ and Σ₌ toolbar buttons + insertion modal with live preview and quick-reference
+- Double-click to edit any equation node
+- Custom TipTap Node extensions: MathInline, MathBlock
+
+---
+
 ## [1.0.0] — 2026-04-08
 
 ### Initial public release

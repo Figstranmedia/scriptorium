@@ -171,18 +171,26 @@ Store keys: `aiProvider` ('claude'|'ollama'), `anthropicApiKey`, `ollamaModel`, 
 - ✅ BLOQUE 8: Layout → PDF export, PNG per-page export, crop marks / bleed control
 - ✅ BLOQUE 6.1: Shape frames — rect/ellipse/line with fill, stroke, dasharray, corner radius
   - Keys: R (rect), E (ellipse), L (line) | Props panel: all shape styling | SVG export
+- ✅ BLOQUE 9: KaTeX equations in layout text frames
+  - MathInline + MathBlock TipTap Node extensions, modal with live preview, Σ/Σ₌ toolbar buttons
+- ✅ BLOQUE 10: ECharts data charts as layout frames
+  - LayoutChartFrame: bar/line/area/pie/scatter, inline data editor, 4 palettes, svgCache for export
+  - Key: C | Props panel: chart type, position, dimensions
+- ✅ BLOQUE 13: SVG / Affinity Designer 2 export
+  - generatePageSVG() → native SVG per page in mm; shapes/images/text/charts all supported
+  - IPC: export:layout-svg | ExportModal: "🎨 SVG / Affinity" format option
 
-## Export architecture (BLOQUE 8 — added 2026-04-08)
-Two export paths live in `src/renderer/src/lib/printHTML.ts`:
+## Export architecture (updated 2026-04-09)
+Three export paths live in `src/renderer/src/lib/printHTML.ts`:
 
 1. **Write mode** (`generatePrintHTML`): HTML → hidden window → `printToPDF`. Classic flow.
-2. **Layout mode** (`generateLayoutPrintHTML`): converts `doc.layoutFrames` to absolutely-positioned
-   divs in mm units (px→mm via `pxToMm = px*25.4/96`), optional bleed box + crop marks.
-   Rendered via `export:layout-pdf` IPC handler.
-3. **PNG per page** (`export:png-pages`): one `BrowserWindow` per page (sized to page pixels),
-   `capturePage()` → `toPNG()` → saved as `{base}_p01.png`, `{base}_p02.png`, etc.
+2. **Layout mode PDF** (`generateLayoutPrintHTML`): frames → mm-unit HTML → `export:layout-pdf` IPC.
+3. **PNG per page** (`export:png-pages`): one `BrowserWindow` per page → `capturePage()` → PNG files.
+4. **SVG / Affinity** (`generateLayoutSVGPages`): frames → native SVG per page → `export:layout-svg` IPC.
+   - Text frames use `<foreignObject>`, shapes use native SVG, images use `<image>`, charts embed svgCache.
 
 `ExportModal` auto-selects "Maquetación" tab when `doc.layoutFrames.length > 0`.
+Format buttons: PDF | PNG | SVG/Affinity
 
 ## Known limitations / future work
 - Layout PNG export: 1 window per page, ~1s delay each → slow for many pages.
