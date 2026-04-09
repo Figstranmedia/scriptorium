@@ -5,10 +5,8 @@ import {
   distributeContent, isImageFrame, isShapeFrame
 } from '../../lib/threadEngine'
 import { LayoutPage, PAGE_SIZES, mmToPx, type PageSize, type DrawMode } from './LayoutPage'
-import { LayoutPropertiesPanel } from './LayoutPropertiesPanel'
 import { PreflightBadge, PreflightPanel } from './PreflightPanel'
 import { MasterPagePanel, createDefaultMaster, type MasterPage } from './MasterPagePanel'
-import { LayersPanel } from './LayersPanel'
 import { PageStrip } from './PageStrip'
 import { ContextMenu } from './ContextMenu'
 import { AIDesignPanel } from './AIDesignPanel'
@@ -17,8 +15,8 @@ import { parsePDF } from '../../lib/pdfImport'
 import { snapPosition } from '../../lib/snap'
 import type { Document, Guide, ParagraphStyle } from '../../store/useStore'
 import { DEFAULT_PARAGRAPH_STYLES } from '../../store/useStore'
-import { StylesPanel } from './StylesPanel'
 import { CoverCanvas } from './CoverCanvas'
+import { StudioSidebar } from './StudioSidebar'
 
 interface Props {
   document: Document
@@ -42,7 +40,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const [masters, setMasters] = useState<MasterPage[]>(document.layoutMasters || [])
   const [pageAssignments, setPageAssignments] = useState<Record<number, string>>(document.layoutPageAssignments || {})
   const [guides, setGuides] = useState<Guide[]>(document.layoutGuides || [])
-  const [rightPanelTab, setRightPanelTab] = useState<'props' | 'preflight' | 'layers' | 'masters' | 'styles'>('props')
+  const [historyRevision, setHistoryRevision] = useState(0)
   const [paragraphStyles, setParagraphStyles] = useState<ParagraphStyle[]>(
     document.paragraphStyles && document.paragraphStyles.length > 0
       ? document.paragraphStyles
@@ -65,6 +63,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   // Undo/Redo history
   const history = useRef<AnyLayoutFrame[][]>([JSON.parse(JSON.stringify(document.layoutFrames || []))])
   const historyIndex = useRef(0)
+  const historyLabels = useRef<string[]>(['Estado inicial'])
 
   const pageSize: PageSize = PAGE_SIZES[pageSizeKey] || PAGE_SIZES.A4
   const selectedFrameId = selectedFrameIds[selectedFrameIds.length - 1] ?? null
@@ -80,12 +79,18 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const preflightReport = useMemo(() => runPreflight(frames, contentMap, pageCount), [frames, contentMap, pageCount])
 
   // ── Undo/Redo ────────────────────────────────────────────────────────────────
-  const pushHistory = useCallback((newFrames: AnyLayoutFrame[]) => {
+  const pushHistory = useCallback((newFrames: AnyLayoutFrame[], label = 'Editar') => {
     const snapshot = JSON.parse(JSON.stringify(newFrames))
     history.current = history.current.slice(0, historyIndex.current + 1)
+    historyLabels.current = historyLabels.current.slice(0, historyIndex.current + 1)
     history.current.push(snapshot)
-    if (history.current.length > MAX_HISTORY) history.current.shift()
+    historyLabels.current.push(label)
+    if (history.current.length > MAX_HISTORY) {
+      history.current.shift()
+      historyLabels.current.shift()
+    }
     historyIndex.current = history.current.length - 1
+    setHistoryRevision(r => r + 1)
   }, [])
 
   const undo = useCallback(() => {
@@ -165,7 +170,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           }
           return f
         })
-      pushHistory(next)
+      pushHistory(next, 'Eliminar')
       saveLayout(next)
       return next
     })
@@ -176,7 +181,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     const frame = createDefaultFrame(pageIndex, x, y, { width: w ?? 400, height: h ?? 500 })
     setFrames(prev => {
       const next = [...prev, frame]
-      pushHistory(next)
+      pushHistory(next, 'Añadir texto')
       saveLayout(next)
       return next
     })
@@ -190,7 +195,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     if (h) frame.height = h
     setFrames(prev => {
       const next = [...prev, frame]
-      pushHistory(next)
+      pushHistory(next, 'Añadir imagen')
       saveLayout(next)
       return next
     })
@@ -208,7 +213,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     })
     setFrames(prev => {
       const next = [...prev, frame]
-      pushHistory(next)
+      const label = shapeType === 'rect' ? 'Añadir rect.' : shapeType === 'ellipse' ? 'Añadir elipse' : 'Añadir línea'
+      pushHistory(next, label)
       saveLayout(next)
       return next
     })
@@ -225,7 +231,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     })
     setFrames(prev => {
       const next = [...prev, frame]
-      pushHistory(next)
+      pushHistory(next, 'Añadir gráfico')
       saveLayout(next)
       return next
     })
@@ -289,11 +295,21 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           default: return f
         }
       })
-      pushHistory(next)
+      pushHistory(next, 'Alinear')
       saveLayout(next)
       return next
     })
   }, [frames, selectedFrameIds, saveLayout, pushHistory])
+
+  // ── Jump to history state ─────────────────────────────────────────────────────
+  const handleJumpToHistory = useCallback((idx: number) => {
+    if (idx < 0 || idx >= history.current.length) return
+    historyIndex.current = idx
+    const snapshot = JSON.parse(JSON.stringify(history.current[idx]))
+    setFrames(snapshot)
+    saveLayout(snapshot)
+    setHistoryRevision(r => r + 1)
+  }, [saveLayout])
 
   // ── Copy / Paste / Duplicate ─────────────────────────────────────────────────
   const copyFrames = useCallback(() => {
@@ -311,7 +327,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     }))
     setFrames(prev => {
       const next = [...prev, ...newFrames]
-      pushHistory(next)
+      pushHistory(next, 'Pegar')
       saveLayout(next)
       return next
     })
@@ -320,7 +336,6 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
 
   const duplicateFrames = useCallback(() => {
     copyFrames()
-    // paste happens after clipboard is set via effect
     const sel = frames.filter(f => selectedFrameIds.includes(f.id))
     const newFrames = sel.map(f => ({
       ...JSON.parse(JSON.stringify(f)),
@@ -330,7 +345,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     }))
     setFrames(prev => {
       const next = [...prev, ...newFrames]
-      pushHistory(next)
+      pushHistory(next, 'Duplicar')
       saveLayout(next)
       return next
     })
@@ -910,73 +925,36 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         </div>
       </div>
 
-      {/* Right panel */}
-      <div className="w-56 shrink-0 bg-slate-800 border-l border-slate-700 overflow-hidden flex flex-col">
-        <div className="flex border-b border-slate-700 shrink-0">
-          {([
-            { id: 'props',    label: 'Props',    emoji: '⚙' },
-            { id: 'styles',   label: 'Estilos',  emoji: 'Aa' },
-            { id: 'preflight',label: 'Check',    emoji: preflightReport.status === 'ok' ? '✓' : '⚠' },
-            { id: 'layers',   label: 'Capas',    emoji: '◫' },
-            { id: 'masters',  label: 'Master',   emoji: '📋' },
-          ] as const).map(tab => (
-            <button key={tab.id} onClick={() => setRightPanelTab(tab.id)}
-              className={`flex-1 py-2 text-[9px] font-sans transition ${rightPanelTab === tab.id ? 'text-white border-b-2 border-indigo-400' : 'text-slate-500 hover:text-slate-300'}`}>
-              {tab.emoji} {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          {rightPanelTab === 'props' && (
-            <LayoutPropertiesPanel
-              frame={selectedFrame}
-              styles={paragraphStyles}
-              onUpdate={handleUpdateFrame}
-              onUnlink={handleUnlink}
-              onApplyStyle={handleApplyStyle}
-            />
-          )}
-          {rightPanelTab === 'styles' && (
-            <StylesPanel styles={paragraphStyles} onUpdate={handleUpdateStyles} />
-          )}
-          {rightPanelTab === 'preflight' && (
-            <div className="p-3">
-              <PreflightPanel report={preflightReport} onSelectFrame={(id) => setSelectedFrameIds([id])} />
-            </div>
-          )}
-          {rightPanelTab === 'layers' && (
-            <LayersPanel
-              frames={frames}
-              selectedFrameIds={selectedFrameIds}
-              pageCount={pageCount}
-              onSelectFrame={(id) => setSelectedFrameIds([id])}
-              onUpdateFrame={handleUpdateFrame}
-              onDeleteFrame={(id) => handleDeleteFrame(id)}
-            />
-          )}
-          {rightPanelTab === 'masters' && (
-            <MasterPagePanel
-              masters={masters}
-              pageAssignments={pageAssignments}
-              pageCount={pageCount}
-              onCreateMaster={handleCreateMaster}
-              onDeleteMaster={handleDeleteMaster}
-              onUpdateMaster={handleUpdateMaster}
-              onAssignMaster={handleAssignMaster}
-            />
-          )}
-        </div>
-
-        <div className="px-3 py-2 border-t border-slate-700 text-[10px] font-sans text-slate-500">
-          {frames.filter(f => !isImageFrame(f)).length}T · {frames.filter(f => isImageFrame(f)).length}I · {pageCount}pág
-          {selectedFrameIds.length > 1 && <span className="ml-2 text-indigo-400">{selectedFrameIds.length} sel.</span>}
-        </div>
-      </div>
+      {/* Right panel — Studio Sidebar */}
+      <StudioSidebar
+        selectedFrame={selectedFrame}
+        selectedFrameIds={selectedFrameIds}
+        frames={frames}
+        currentPageIndex={activePageIndex}
+        pageCount={pageCount}
+        paragraphStyles={paragraphStyles}
+        onUpdateStyles={handleUpdateStyles}
+        onApplyStyle={handleApplyStyle}
+        onUpdateFrame={handleUpdateFrame}
+        onDeleteFrame={(id) => handleDeleteFrame(id)}
+        onSelectFrame={(id) => setSelectedFrameIds([id])}
+        onUnlink={handleUnlink}
+        onAlign={alignFrames}
+        masters={masters}
+        pageAssignments={pageAssignments}
+        onCreateMaster={handleCreateMaster}
+        onDeleteMaster={handleDeleteMaster}
+        onUpdateMaster={handleUpdateMaster}
+        onAssignMaster={handleAssignMaster}
+        preflightReport={preflightReport}
+        historyLabels={historyLabels.current}
+        historyCurrentIndex={historyIndex.current}
+        onJumpToHistory={handleJumpToHistory}
+      />
 
       {/* AI Design floating panel */}
       {showAIDesign && (
-        <div style={{ position: 'absolute', top: 56, right: 232, zIndex: 500 }}>
+        <div style={{ position: 'absolute', top: 56, right: 228, zIndex: 500 }}>
           <AIDesignPanel
             selectedFrame={selectedFrame}
             onApply={(changes) => {
