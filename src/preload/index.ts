@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('api', {
   exportLayoutPDF: (html: string, title: string) => ipcRenderer.invoke('export:layout-pdf', html, title),
   exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) =>
     ipcRenderer.invoke('export:png-pages', pages, title),
+  exportLayoutSVG: (svgPages: Array<{svg: string; pageIndex: number}>, title: string) =>
+    ipcRenderer.invoke('export:layout-svg', svgPages, title),
 
   // Images
   pickImage: () => ipcRenderer.invoke('image:pick'),

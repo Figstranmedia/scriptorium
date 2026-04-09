@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import {
   generatePrintHTML,
   generateLayoutPrintHTML,
+  generateLayoutSVGPages,
   DEFAULT_PDF_OPTIONS,
   DEFAULT_LAYOUT_EXPORT_OPTIONS,
   type PDFOptions,
@@ -18,7 +19,7 @@ interface Props {
 }
 
 type ExportTab = 'write' | 'layout'
-type ExportFormat = 'pdf' | 'png'
+type ExportFormat = 'pdf' | 'png' | 'svg'
 
 const PAGE_SIZES = ['A4', 'Letter', 'A5', 'Legal'] as const
 const CITATION_STYLES: { id: CitationStyle; label: string }[] = [
@@ -127,10 +128,16 @@ export function ExportModal({ document, onClose }: Props) {
       setExporting(false)
       if (res?.canceled) { onClose(); return }
       setResult(res)
-    } else {
-      // PNG per page
+    } else if (format === 'png') {
       const pages = buildPageHTMLs(document, layoutOpts)
       const res = await window.api.exportPNGPages(pages, document.title)
+      setExporting(false)
+      if (res?.canceled) { onClose(); return }
+      setResult(res)
+    } else {
+      // SVG / Affinity Designer
+      const svgPages = generateLayoutSVGPages(document)
+      const res = await window.api.exportLayoutSVG(svgPages, document.title)
       setExporting(false)
       if (res?.canceled) { onClose(); return }
       setResult(res)
@@ -279,21 +286,30 @@ export function ExportModal({ document, onClose }: Props) {
                 Formato de exportación
               </label>
               <div className="flex gap-2">
-                {(['pdf', 'png'] as ExportFormat[]).map(f => (
-                  <button key={f} onClick={() => setFormat(f)}
+                {([
+                  { id: 'pdf', label: '📄 PDF' },
+                  { id: 'png', label: '🖼 PNG' },
+                  { id: 'svg', label: '🎨 SVG / Affinity' },
+                ] as { id: ExportFormat; label: string }[]).map(f => (
+                  <button key={f.id} onClick={() => setFormat(f.id)}
                     className="flex-1 py-2 rounded text-xs font-sans transition"
                     style={{
-                      background: format === f ? '#2d2d60' : '#2a2a2e',
-                      color: format === f ? '#a5b4fc' : '#9ca3af',
-                      border: format === f ? '1px solid #4f4fa8' : '1px solid #3a3a40',
+                      background: format === f.id ? '#2d2d60' : '#2a2a2e',
+                      color: format === f.id ? '#a5b4fc' : '#9ca3af',
+                      border: format === f.id ? '1px solid #4f4fa8' : '1px solid #3a3a40',
                     }}>
-                    {f === 'pdf' ? '📄 PDF' : '🖼 PNG por página'}
+                    {f.label}
                   </button>
                 ))}
               </div>
               {format === 'png' && (
                 <p className="mt-1.5 text-xs font-sans" style={{ color: '#6b7280' }}>
                   Exporta cada página como imagen independiente (alta resolución).
+                </p>
+              )}
+              {format === 'svg' && (
+                <p className="mt-1.5 text-xs font-sans" style={{ color: '#6b7280' }}>
+                  SVG vectorial compatible con Affinity Designer 2. Formas y gráficos como capas editables.
                 </p>
               )}
             </div>
@@ -349,8 +365,10 @@ export function ExportModal({ document, onClose }: Props) {
             <div className="rounded-lg p-3 text-xs font-sans"
                  style={{ background: '#162316', border: '1px solid #2d5a2d', color: '#86efac' }}>
               {format === 'png' && result.count
-                ? `✓ ${result.count} imagen${result.count !== 1 ? 'es' : ''} exportada${result.count !== 1 ? 's' : ''}`
-                : '✓ Exportado correctamente'}
+                ? `✓ ${result.count} PNG${result.count !== 1 ? 's' : ''} exportado${result.count !== 1 ? 's' : ''}`
+                : format === 'svg' && result.count
+                  ? `✓ ${result.count} SVG${result.count !== 1 ? 's' : ''} exportado${result.count !== 1 ? 's' : ''}`
+                  : '✓ Exportado correctamente'}
               {result.filePath && (
                 <p className="mt-0.5 font-mono truncate" style={{ color: '#4ade80', opacity: 0.7 }}>
                   {result.filePath}
@@ -390,7 +408,9 @@ export function ExportModal({ document, onClose }: Props) {
                 ? 'Exportando…'
                 : format === 'png' && isLayout
                   ? `⬇ Exportar ${pageCount} PNG${pageCount !== 1 ? 's' : ''}`
-                  : '⬇ Exportar PDF'}
+                  : format === 'svg' && isLayout
+                    ? `⬇ Exportar ${pageCount} SVG${pageCount !== 1 ? 's' : ''}`
+                    : '⬇ Exportar PDF'}
             </button>
           )}
         </div>

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } from '../../lib/threadEngine'
 import {
-  createDefaultFrame, createDefaultImageFrame, createDefaultShapeFrame,
+  createDefaultFrame, createDefaultImageFrame, createDefaultShapeFrame, createDefaultChartFrame,
   distributeContent, isImageFrame, isShapeFrame
 } from '../../lib/threadEngine'
 import { LayoutPage, PAGE_SIZES, mmToPx, type PageSize, type DrawMode } from './LayoutPage'
@@ -205,6 +205,23 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     const frame = createDefaultShapeFrame(pageIndex, x, y, shapeType, {
       width: w ?? 200,
       height: h ?? (shapeType === 'line' ? 2 : 150),
+    })
+    setFrames(prev => {
+      const next = [...prev, frame]
+      pushHistory(next)
+      saveLayout(next)
+      return next
+    })
+    setSelectedFrameIds([frame.id])
+    setDrawMode('pointer')
+  }, [saveLayout, pushHistory])
+
+  const handleAddChartFrame = useCallback((
+    pageIndex: number, x: number, y: number, w?: number, h?: number
+  ) => {
+    const frame = createDefaultChartFrame(pageIndex, x, y, {
+      width: w ?? 320,
+      height: h ?? 240,
     })
     setFrames(prev => {
       const next = [...prev, frame]
@@ -630,6 +647,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       if (e.key === 'r' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-rect' ? 'pointer' : 'draw-rect'); return }
       if (e.key === 'e' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-ellipse' ? 'pointer' : 'draw-ellipse'); return }
       if (e.key === 'l' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-line' ? 'pointer' : 'draw-line'); return }
+      if (e.key === 'c' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-chart' ? 'pointer' : 'draw-chart'); return }
       if (e.key === 's' && !e.metaKey && !e.ctrlKey) { setSnapEnabled(v => !v); return }
 
       // Zoom
@@ -722,6 +740,10 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
               className="px-2 py-1 rounded text-xs transition"
               style={{ background: drawMode === 'draw-line' ? '#059669' : 'transparent', color: drawMode === 'draw-line' ? '#fff' : '#a0a0a8' }}
               title="Línea (L)">╱</button>
+            <button onClick={() => setDrawMode(m => m === 'draw-chart' ? 'pointer' : 'draw-chart')}
+              className="px-2 py-1 rounded text-xs transition"
+              style={{ background: drawMode === 'draw-chart' ? '#d97706' : 'transparent', color: drawMode === 'draw-chart' ? '#fff' : '#a0a0a8' }}
+              title="Gráfico (C)">📊</button>
           </div>
 
           <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
@@ -783,6 +805,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                 : drawMode === 'draw-image' ? 'Arrastra para crear marco de imagen'
                 : drawMode === 'draw-rect' ? 'Arrastra para dibujar un rectángulo (R)'
                 : drawMode === 'draw-ellipse' ? 'Arrastra para dibujar una elipse (E)'
+                : drawMode === 'draw-chart' ? 'Arrastra para insertar un gráfico (C)'
                 : 'Arrastra para dibujar una línea (L)'}
               <button onClick={() => setDrawMode('pointer')} className="ml-2 underline">Cancelar</button>
             </div>
@@ -874,6 +897,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                 onAddTextFrame={handleAddTextFrame}
                 onAddImageFrame={handleAddImageFrame}
                 onAddShapeFrame={handleAddShapeFrame}
+                onAddChartFrame={handleAddChartFrame}
                 onStartLink={handleStartLink}
                 onCompleteLink={handleCompleteLink}
                 onDoubleClickGuide={handleDeleteGuide}

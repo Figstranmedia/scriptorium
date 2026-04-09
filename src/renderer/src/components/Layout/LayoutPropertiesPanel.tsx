@@ -1,6 +1,6 @@
 import React from 'react'
-import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, AnyLayoutFrame } from '../../lib/threadEngine'
-import { isImageFrame, isShapeFrame } from '../../lib/threadEngine'
+import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, LayoutChartFrame, AnyLayoutFrame } from '../../lib/threadEngine'
+import { isImageFrame, isShapeFrame, isChartFrame } from '../../lib/threadEngine'
 import { FontPicker } from './FontPicker'
 import type { ParagraphStyle } from '../../store/useStore'
 
@@ -65,6 +65,44 @@ export function LayoutPropertiesPanel({ frame, styles = [], onUpdate, onUnlink, 
   }
 
   const upd = (updates: Partial<AnyLayoutFrame>) => onUpdate(frame.id, updates)
+
+  if (isChartFrame(frame)) {
+    const cf = frame as LayoutChartFrame
+    const CHART_TYPES = [
+      { value: 'bar', label: '▊ Barras' },
+      { value: 'line', label: '📈 Líneas' },
+      { value: 'area', label: '◼ Área' },
+      { value: 'pie', label: '◑ Torta' },
+      { value: 'scatter', label: '⋯ Disp.' },
+    ] as const
+    return (
+      <div className="p-3 space-y-3 overflow-y-auto">
+        <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">📊 Gráfico</p>
+        <div>
+          <label className="text-[10px] text-slate-400 font-sans block mb-1">Tipo</label>
+          <div className="flex flex-wrap gap-1">
+            {CHART_TYPES.map(t => (
+              <button key={t.value} onClick={() => upd({ chartType: t.value } as Partial<LayoutChartFrame>)}
+                className={`px-2 py-1 rounded text-[10px] font-sans border transition ${cf.chartType === t.value ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-400'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <NumField label="X" value={cf.x} min={0} max={2000} onChange={v => upd({ x: v })} />
+        <NumField label="Y" value={cf.y} min={0} max={3000} onChange={v => upd({ y: v })} />
+        <NumField label="Ancho" value={cf.width} min={80} max={2000} onChange={v => upd({ width: v })} />
+        <NumField label="Alto" value={cf.height} min={60} max={3000} onChange={v => upd({ height: v })} />
+        <NumField label="Opacidad" value={cf.opacity * 100} min={0} max={100}
+          onChange={v => upd({ opacity: v / 100 } as Partial<LayoutChartFrame>)} />
+        <NumField label="Z-index" value={cf.zIndex} min={0} max={100}
+          onChange={v => upd({ zIndex: v } as Partial<LayoutChartFrame>)} />
+        <div className="text-[10px] text-slate-400 font-sans pt-1">
+          Doble clic sobre el gráfico para editar datos.
+        </div>
+      </div>
+    )
+  }
 
   if (isShapeFrame(frame)) {
     const sf = frame as LayoutShapeFrame

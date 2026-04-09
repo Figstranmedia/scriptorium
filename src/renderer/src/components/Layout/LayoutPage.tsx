@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react'
-import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, AnyLayoutFrame } from '../../lib/threadEngine'
-import { isImageFrame, isShapeFrame } from '../../lib/threadEngine'
+import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, LayoutChartFrame, AnyLayoutFrame } from '../../lib/threadEngine'
+import { isImageFrame, isShapeFrame, isChartFrame } from '../../lib/threadEngine'
 import { LayoutTextFrameComp } from './LayoutTextFrame'
 import { LayoutImageFrameComp } from './LayoutImageFrame'
 import { LayoutShapeFrameComp } from './LayoutShapeFrame'
+import { LayoutChartFrameComp } from './LayoutChartFrame'
 import type { Guide } from '../../store/useStore'
 
 export interface PageSize {
@@ -23,7 +24,7 @@ export function mmToPx(mm: number): number {
   return (mm / 25.4) * 96
 }
 
-export type DrawMode = 'pointer' | 'draw-text' | 'draw-image' | 'draw-rect' | 'draw-ellipse' | 'draw-line'
+export type DrawMode = 'pointer' | 'draw-text' | 'draw-image' | 'draw-rect' | 'draw-ellipse' | 'draw-line' | 'draw-chart'
 
 interface DrawRect { x: number; y: number; w: number; h: number }
 
@@ -46,6 +47,7 @@ interface Props {
   onAddTextFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
   onAddImageFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
   onAddShapeFrame: (pageIndex: number, x: number, y: number, shapeType: 'rect' | 'ellipse' | 'line', w?: number, h?: number) => void
+  onAddChartFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
   onStartLink: (id: string) => void
   onCompleteLink: (targetId: string) => void
   onDoubleClickGuide?: (guideId: string) => void
@@ -59,7 +61,7 @@ export function LayoutPage({
   selectedFrameIds, showBaselineGrid, baselineGridStep,
   linkingFrom, drawMode, guides, snapLines = [],
   onSelectFrame, onSelectFramesByRect, onUpdateFrame, onDeleteFrame,
-  onAddTextFrame, onAddImageFrame, onAddShapeFrame, onStartLink, onCompleteLink,
+  onAddTextFrame, onAddImageFrame, onAddShapeFrame, onAddChartFrame, onStartLink, onCompleteLink,
   onDoubleClickGuide, onContextMenu, onAIAction, scale,
 }: Props) {
   const pageRef = useRef<HTMLDivElement>(null)
@@ -87,7 +89,7 @@ export function LayoutPage({
     if ((e.target as HTMLElement) !== pageRef.current) return
     const { x, y } = getPageXY(e)
 
-    if (drawMode === 'draw-text' || drawMode === 'draw-image' || drawMode === 'draw-rect' || drawMode === 'draw-ellipse' || drawMode === 'draw-line') {
+    if (drawMode === 'draw-text' || drawMode === 'draw-image' || drawMode === 'draw-rect' || drawMode === 'draw-ellipse' || drawMode === 'draw-line' || drawMode === 'draw-chart') {
       e.preventDefault()
       drawStart.current = { x, y }
       setDrawRect({ x, y, w: 0, h: 0 })
@@ -119,6 +121,7 @@ export function LayoutPage({
         else if (drawMode === 'draw-rect') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'rect', w, Math.max(20, h))
         else if (drawMode === 'draw-ellipse') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'ellipse', w, Math.max(20, h))
         else if (drawMode === 'draw-line') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'line', w, 2)
+        else if (drawMode === 'draw-chart') onAddChartFrame(pageIndex, drawRect.x, drawRect.y, w, Math.max(80, h))
       }
       drawStart.current = null; setDrawRect(null); e.stopPropagation()
     }
@@ -222,6 +225,19 @@ export function LayoutPage({
 
         {/* Frames */}
         {pageFrames.map(frame => {
+          if (isChartFrame(frame)) {
+            return (
+              <LayoutChartFrameComp
+                key={frame.id}
+                frame={frame as LayoutChartFrame}
+                isSelected={selectedFrameIds.includes(frame.id)}
+                onSelect={() => onSelectFrame(frame.id)}
+                onUpdate={(updates) => onUpdateFrame(frame.id, updates)}
+                onDelete={() => onDeleteFrame(frame.id)}
+                scale={scale}
+              />
+            )
+          }
           if (isShapeFrame(frame)) {
             return (
               <LayoutShapeFrameComp

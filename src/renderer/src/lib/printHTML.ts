@@ -1,6 +1,6 @@
 import type { Document, CitationStyle } from '../store/useStore'
-import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } from './threadEngine'
-import { isImageFrame, isShapeFrame } from './threadEngine'
+import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame, LayoutChartFrame } from './threadEngine'
+import { isImageFrame, isShapeFrame, isChartFrame } from './threadEngine'
 import { formatReference } from './citations'
 
 export interface PDFOptions {
@@ -59,6 +59,14 @@ function frameToHTML(f: AnyLayoutFrame): string {
   const wMm  = pxToMm(f.width).toFixed(3)
   const hMm  = pxToMm(f.height).toFixed(3)
   const rMm  = pxToMm(f.cornerRadius ?? 0).toFixed(3)
+
+  if (isChartFrame(f)) {
+    const cf = f as LayoutChartFrame
+    const svgContent = cf.svgCache
+      ? cf.svgCache.replace(/width="[^"]*"/, `width="${wMm}mm"`).replace(/height="[^"]*"/, `height="${hMm}mm"`)
+      : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#9ca3af;font-family:sans-serif;font-size:12px;">Gráfico</div>`
+    return `<div style="position:absolute;left:${xMm}mm;top:${yMm}mm;width:${wMm}mm;height:${hMm}mm;opacity:${cf.opacity};overflow:hidden;">${svgContent}</div>`
+  }
 
   if (isShapeFrame(f)) {
     const sf = f as LayoutShapeFrame
@@ -170,6 +178,114 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   includePageNumbers: true,
   pageNumberPosition: 'bottom-center',
   citationStyle: 'apa',
+}
+
+// ─── SVG / Affinity Export ────────────────────────────────────────────────────
+
+/** Convert a single layout page to a self-contained SVG string.
+ *  Compatible with Affinity Designer 2 (uses foreignObject for text). */
+export function generatePageSVG(
+  frames: AnyLayoutFrame[],
+  pageIndex: number,
+  widthMM: number,
+  heightMM: number,
+): string {
+  const W = widthMM
+  const H = heightMM
+
+  const pageFrames = [...frames.filter(f => f.pageIndex === pageIndex)]
+    .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+
+  const elements = pageFrames.map(f => {
+    const x  = pxToMm(f.x)
+    const y  = pxToMm(f.y)
+    const w  = pxToMm(f.width)
+    const h  = pxToMm(f.height)
+    const op = f.opacity ?? 1
+
+    if (isChartFrame(f)) {
+      const cf = f as LayoutChartFrame
+      if (cf.svgCache) {
+        // Wrap existing SVG in a group at correct position
+        const inner = cf.svgCache
+          .replace(/<svg[^>]*>/, '')
+          .replace(/<\/svg>/, '')
+        return `<g transform="translate(${x.toFixed(3)},${y.toFixed(3)})" opacity="${op}">` +
+          `<svg width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" xmlns="http://www.w3.org/2000/svg">${inner}</svg></g>`
+      }
+      return `<rect x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" fill="#f3f4f6" opacity="${op}"/>`
+    }
+
+    if (isShapeFrame(f)) {
+      const sf = f as LayoutShapeFrame
+      const sw = pxToMm(sf.strokeWidth)
+      const da = sf.strokeStyle === 'dashed' ? 'stroke-dasharray="8,4"' : sf.strokeStyle === 'dotted' ? 'stroke-dasharray="2,4"' : ''
+      const fill = sf.fillColor || 'transparent'
+      const stroke = sf.strokeColor || 'none'
+      const rx = pxToMm(sf.cornerRadius ?? 0)
+
+      if (sf.shapeType === 'line') {
+        return `<line x1="${x.toFixed(3)}mm" y1="${(y + h/2).toFixed(3)}mm" x2="${(x+w).toFixed(3)}mm" y2="${(y + h/2).toFixed(3)}mm" stroke="${stroke}" stroke-width="${sw.toFixed(3)}mm" ${da} opacity="${op}"/>`
+      }
+      if (sf.shapeType === 'ellipse') {
+        return `<ellipse cx="${(x+w/2).toFixed(3)}mm" cy="${(y+h/2).toFixed(3)}mm" rx="${Math.max(0,(w-sw)/2).toFixed(3)}mm" ry="${Math.max(0,(h-sw)/2).toFixed(3)}mm" fill="${fill}" stroke="${stroke}" stroke-width="${sw.toFixed(3)}mm" ${da} opacity="${op}"/>`
+      }
+      return `<rect x="${(x+sw/2).toFixed(3)}mm" y="${(y+sw/2).toFixed(3)}mm" width="${Math.max(0,w-sw).toFixed(3)}mm" height="${Math.max(0,h-sw).toFixed(3)}mm" fill="${fill}" stroke="${stroke}" stroke-width="${sw.toFixed(3)}mm" rx="${rx.toFixed(3)}mm" ${da} opacity="${op}"/>`
+    }
+
+    if (isImageFrame(f)) {
+      const img = f as LayoutImageFrame
+      const r = pxToMm(img.cornerRadius ?? 0)
+      const bw = pxToMm(img.borderWidth ?? 0)
+      const clipId = `clip_${f.id}`
+      const clipRect = r > 0
+        ? `<clipPath id="${clipId}"><rect x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" rx="${r.toFixed(3)}mm"/></clipPath>`
+        : ''
+      const clipAttr = r > 0 ? ` clip-path="url(#${clipId})"` : ''
+      const aspect = img.fit === 'fit' ? 'xMidYMid meet' : 'xMidYMid slice'
+      const border = bw > 0 ? `<rect x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" fill="none" stroke="${img.borderColor||'#000'}" stroke-width="${bw.toFixed(3)}mm" rx="${r.toFixed(3)}mm"/>` : ''
+      return `${clipRect}<image href="${img.src}" x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" preserveAspectRatio="${aspect}" opacity="${op}"${clipAttr}/>${border}`
+    }
+
+    // Text frame
+    const tf = f as LayoutFrame
+    const bg = (tf.backgroundColor && tf.backgroundColor !== 'transparent')
+      ? `<rect x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" fill="${tf.backgroundColor}" opacity="${op}"/>`
+      : ''
+    const bw = pxToMm(tf.borderWidth ?? 0)
+    const r  = pxToMm(tf.cornerRadius ?? 0)
+    const border = bw > 0
+      ? `<rect x="${x.toFixed(3)}mm" y="${y.toFixed(3)}mm" width="${w.toFixed(3)}mm" height="${h.toFixed(3)}mm" fill="none" stroke="${tf.borderColor||'#000'}" stroke-width="${bw.toFixed(3)}mm" rx="${r.toFixed(3)}mm" opacity="${op}"/>`
+      : ''
+    const pt = pxToMm(tf.paddingTop ?? 4)
+    const pl = pxToMm(tf.paddingLeft ?? 6)
+    const font = resolveFont(tf.fontFamily)
+    // foreignObject for rich HTML text
+    const fo = `<foreignObject x="${(x+pl).toFixed(3)}mm" y="${(y+pt).toFixed(3)}mm" width="${Math.max(0,w-pl*2).toFixed(3)}mm" height="${Math.max(0,h-pt*2).toFixed(3)}mm" opacity="${op}">` +
+      `<div xmlns="http://www.w3.org/1999/xhtml" style="font-family:${font};font-size:${tf.fontSize}pt;line-height:${tf.lineHeight};font-weight:${tf.fontWeight};font-style:${tf.fontStyle};text-align:${tf.textAlign};color:${tf.textColor};overflow:hidden;width:100%;height:100%;">${tf.ownContent || ''}</div>` +
+      `</foreignObject>`
+    return `${bg}${fo}${border}`
+  }).join('\n    ')
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+  width="${W}mm" height="${H}mm" viewBox="0 0 ${W} ${H}">
+  <rect width="${W}" height="${H}" fill="white"/>
+  ${elements}
+</svg>`
+}
+
+/** Generate SVG files for all pages of a layout document */
+export function generateLayoutSVGPages(doc: Document): Array<{ svg: string; pageIndex: number }> {
+  const frames   = (doc.layoutFrames  || []) as AnyLayoutFrame[]
+  const pageCount = doc.layoutPageCount || 1
+  const sizeKey  = doc.layoutPageSize  || 'A4'
+  const pageSize = LAYOUT_PAGE_SIZES[sizeKey] ?? LAYOUT_PAGE_SIZES.A4
+
+  return Array.from({ length: pageCount }, (_, i) => ({
+    svg: generatePageSVG(frames, i, pageSize.widthMM, pageSize.heightMM),
+    pageIndex: i,
+  }))
 }
 
 const PAGE_SIZES = {

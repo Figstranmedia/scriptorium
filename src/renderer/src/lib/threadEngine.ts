@@ -80,7 +80,35 @@ export interface LayoutShapeFrame {
   locked: boolean
 }
 
-export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame | LayoutShapeFrame
+export interface ChartSeries {
+  name: string
+  values: number[]
+}
+
+export interface LayoutChartFrame {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  pageIndex: number
+  chartType: 'bar' | 'line' | 'pie' | 'scatter' | 'area'
+  title: string
+  data: {
+    labels: string[]
+    series: ChartSeries[]
+  }
+  palette: string[]
+  showLegend: boolean
+  showGrid: boolean
+  backgroundColor: string
+  zIndex: number
+  locked: boolean
+  opacity: number
+  svgCache?: string   // pre-rendered SVG for PDF/SVG export
+}
+
+export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame | LayoutShapeFrame | LayoutChartFrame
 
 export interface ThreadResult {
   frameId: string
@@ -333,6 +361,40 @@ export function createDefaultShapeFrame(
   }
 }
 
+// ── Chart frame factory ───────────────────────────────────────────────────────
+let _chartCounter = 0
+export const DEFAULT_CHART_PALETTE = ['#d4522b', '#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777']
+
+export function createDefaultChartFrame(
+  pageIndex: number,
+  x: number,
+  y: number,
+  partial?: Partial<LayoutChartFrame>,
+): LayoutChartFrame {
+  _chartCounter++
+  return {
+    id: `lcf_${Date.now()}_${_chartCounter}`,
+    x, y,
+    width: 320,
+    height: 240,
+    pageIndex,
+    chartType: 'bar',
+    title: 'Gráfico',
+    data: {
+      labels: ['Ene', 'Feb', 'Mar', 'Abr', 'May'],
+      series: [{ name: 'Serie 1', values: [42, 68, 55, 90, 73] }],
+    },
+    palette: [...DEFAULT_CHART_PALETTE],
+    showLegend: true,
+    showGrid: true,
+    backgroundColor: 'transparent',
+    zIndex: 10,
+    locked: false,
+    opacity: 1,
+    ...partial,
+  }
+}
+
 // ── Type guards ───────────────────────────────────────────────────────────────
 export function isImageFrame(f: AnyLayoutFrame): f is LayoutImageFrame {
   return 'src' in f
@@ -340,4 +402,8 @@ export function isImageFrame(f: AnyLayoutFrame): f is LayoutImageFrame {
 
 export function isShapeFrame(f: AnyLayoutFrame): f is LayoutShapeFrame {
   return 'shapeType' in f
+}
+
+export function isChartFrame(f: AnyLayoutFrame): f is LayoutChartFrame {
+  return 'chartType' in f
 }

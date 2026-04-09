@@ -25,6 +25,7 @@ declare global {
       exportPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       exportLayoutPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number }>
+      exportLayoutSVG: (svgPages: Array<{svg: string; pageIndex: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number; filePath?: string }>
       ollamaPullModel: (modelName: string) => Promise<{ success?: boolean; error?: string }>
       onOllamaPullProgress: (cb: (data: { status: string; percent: number | null; done: boolean }) => void) => void
       offOllamaPullProgress: () => void

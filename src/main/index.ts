@@ -218,6 +218,33 @@ ipcMain.handle('export:png-pages', async (
   return { success: true, paths: savedPaths, count: savedPaths.length }
 })
 
+// ─── IPC: Export SVG pages (Affinity Designer) ───────────────────────────────
+ipcMain.handle('export:layout-svg', async (_event, svgPages: Array<{ svg: string; pageIndex: number }>, title: string) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Exportar SVG para Affinity Designer',
+    defaultPath: `${title || 'layout'}_p01.svg`,
+    filters: [{ name: 'SVG', extensions: ['svg'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+
+  try {
+    const baseName = filePath.replace(/_?p\d+\.svg$/i, '').replace(/\.svg$/i, '')
+    const savedPaths: string[] = []
+
+    for (const { svg, pageIndex } of svgPages) {
+      const svgPath = svgPages.length === 1
+        ? (filePath.endsWith('.svg') ? filePath : `${filePath}.svg`)
+        : `${baseName}_p${String(pageIndex + 1).padStart(2, '0')}.svg`
+      writeFileSync(svgPath, svg, 'utf8')
+      savedPaths.push(svgPath)
+    }
+
+    return { success: true, paths: savedPaths, count: savedPaths.length, filePath: savedPaths[0] }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
 // ─── IPC: Fonts ──────────────────────────────────────────────────────────────
 ipcMain.handle('fonts:list', async () => {
   try {
