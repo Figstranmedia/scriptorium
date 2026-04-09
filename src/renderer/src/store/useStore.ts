@@ -1,6 +1,29 @@
 import { useState, useCallback } from 'react'
 
-export type DocType = 'book' | 'paper' | 'thesis' | 'research' | 'notes'
+export type DocType = 'book' | 'paper' | 'thesis' | 'research' | 'notes' | 'cover'
+
+export const PAPER_THICKNESS_MM: Record<80 | 90 | 115, number> = {
+  80: 0.05,    // mm per page
+  90: 0.055,
+  115: 0.0675,
+}
+
+export const BOOK_FORMATS = [
+  { id: '14x21',  label: '14 × 21 cm', widthMM: 140, heightMM: 210 },
+  { id: '15x23',  label: '15 × 23 cm', widthMM: 150, heightMM: 230 },
+  { id: '21x297', label: '21 × 29.7 cm (A4)', widthMM: 210, heightMM: 297 },
+  { id: 'custom', label: 'Personalizado', widthMM: 0, heightMM: 0 },
+] as const
+
+export interface CoverConfig {
+  formatId: string
+  coverWidthMM: number
+  coverHeightMM: number
+  pageCount: number
+  paperWeight: 80 | 90 | 115
+  bleedMM: number
+  spineMM: number    // calculated: pageCount × thickness
+}
 export type SidebarTab = 'research' | 'suggest' | 'restructure' | 'browser' | 'replace' | 'bibliography'
 export type LayoutStyle = 'default' | 'book' | 'thesis' | 'paper'
 export type CitationStyle = 'apa' | 'mla' | 'chicago' | 'ieee'
@@ -66,6 +89,9 @@ export interface Document {
   layoutPageAssignments?: Record<number, string>
   layoutGuides?: Guide[]
   paragraphStyles?: ParagraphStyle[]
+  coverConfig?: CoverConfig
+  filePath?: string
+  projectFolderPath?: string
   createdAt: number
   updatedAt: number
 }
@@ -90,6 +116,7 @@ export function useStore() {
   const [showExport, setShowExport] = useState(false)
   const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle')
   const [ollamaActiveModel, setOllamaActiveModel] = useState('')
+  const [pendingChatMessage, setPendingChatMessage] = useState<{ text: string; action: string } | null>(null)
 
   const activeDoc = documents.find(d => d.id === activeDocId) || null
 
@@ -142,6 +169,7 @@ export function useStore() {
     showExport, setShowExport,
     ollamaStatus, setOllamaStatus,
     ollamaActiveModel, setOllamaActiveModel,
+    pendingChatMessage, setPendingChatMessage,
     createDocument,
     updateDocument,
     deleteDocument,

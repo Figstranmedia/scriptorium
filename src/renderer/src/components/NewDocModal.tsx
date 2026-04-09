@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-import type { DocType } from '../store/useStore'
+import type { DocType, CoverConfig } from '../store/useStore'
+import { CoverSetupModal } from './Layout/CoverSetupModal'
 
 interface Props {
   onClose: () => void
-  onCreate: (type: DocType) => void
+  onCreate: (type: DocType, coverConfig?: CoverConfig) => void
 }
 
 const TYPES: { id: DocType; emoji: string; label: string; desc: string }[] = [
@@ -12,6 +13,12 @@ const TYPES: { id: DocType; emoji: string; label: string; desc: string }[] = [
     emoji: '📖',
     label: 'Libro',
     desc: 'Capítulos, narrativa, ensayo largo. Fuente serif, márgenes amplios.',
+  },
+  {
+    id: 'cover',
+    emoji: '🎨',
+    label: 'Portada de libro',
+    desc: 'Diseño de tapa, lomo y contraportada como pieza única para imprenta.',
   },
   {
     id: 'paper',
@@ -41,6 +48,26 @@ const TYPES: { id: DocType; emoji: string; label: string; desc: string }[] = [
 
 export function NewDocModal({ onClose, onCreate }: Props) {
   const [selected, setSelected] = useState<DocType>('book')
+  const [showCoverSetup, setShowCoverSetup] = useState(false)
+
+  function handleCreate() {
+    if (selected === 'cover') {
+      setShowCoverSetup(true)
+    } else {
+      onCreate(selected)
+    }
+  }
+
+  if (showCoverSetup) {
+    return (
+      <CoverSetupModal
+        onClose={() => setShowCoverSetup(false)}
+        onCreate={(coverConfig) => {
+          onCreate('cover', coverConfig)
+        }}
+      />
+    )
+  }
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -87,10 +114,10 @@ export function NewDocModal({ onClose, onCreate }: Props) {
             Cancelar
           </button>
           <button
-            onClick={() => onCreate(selected)}
+            onClick={handleCreate}
             className="px-6 py-2 rounded-lg text-sm font-sans text-white bg-accent-500 hover:bg-accent-600 transition font-semibold"
           >
-            Crear documento
+            {selected === 'cover' ? 'Configurar portada →' : 'Crear documento'}
           </button>
         </div>
       </div>

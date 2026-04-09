@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react'
 interface Props {
   store: any
   onNewDoc: () => void
+  onSave?: () => void
+  onSaveAs?: () => void
   onImportPDF?: () => void
   onCloseDoc?: () => void
 }
@@ -95,7 +97,7 @@ function OllamaDot({ status, model }: { status: string; model: string }) {
 }
 
 // ─── Main TitleBar ────────────────────────────────────────────────────────────
-export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
+export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onCloseDoc }: Props) {
   const doc = store.activeDoc
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -134,6 +136,21 @@ export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
             action: () => store.setActiveDocId(d.id),
           }))
         : [{ type: 'item' as const, label: 'Sin documentos recientes', disabled: true, action: () => {} }],
+    },
+    { type: 'separator' },
+    {
+      type: 'item',
+      label: 'Guardar',
+      shortcut: '⌘S',
+      disabled: !doc,
+      action: () => onSave && onSave(),
+    },
+    {
+      type: 'item',
+      label: 'Guardar como…',
+      shortcut: '⌘⇧S',
+      disabled: !doc,
+      action: () => onSaveAs && onSaveAs(),
     },
     { type: 'separator' },
     {
@@ -194,7 +211,7 @@ export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
   ]
 
   return (
-    <div className="titlebar-drag h-11 flex items-center px-4 gap-3 bg-ink-800 text-ink-200 select-none shrink-0">
+    <div className="titlebar-drag h-10 flex items-center px-4 gap-3 select-none shrink-0" style={{ background: '#18181b', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
       {/* macOS traffic lights space */}
       <div className="w-16 shrink-0 titlebar-nodrag" />
 
@@ -212,7 +229,8 @@ export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
         </button>
 
         {menuOpen && (
-          <div className="absolute left-0 top-full mt-1 bg-ink-800 border border-white/10 rounded-lg shadow-2xl min-w-[220px] py-1 z-[100]">
+          <div className="absolute left-0 top-full mt-1 rounded-lg shadow-2xl min-w-[220px] py-1 z-[100]"
+            style={{ background: '#222226', border: '1px solid rgba(255,255,255,0.08)' }}>
             <MenuItems items={menuItems} onClose={() => setMenuOpen(false)} />
           </div>
         )}
@@ -222,18 +240,24 @@ export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
       <span className="text-ink-600">·</span>
 
       {/* App name */}
-      <span className="text-ink-400 text-xs font-sans tracking-widest uppercase">Scriptorium</span>
+      <span className="text-xs font-sans tracking-widest uppercase" style={{ color: '#48484f', letterSpacing: '0.15em' }}>Scriptorium</span>
 
       {/* Doc title */}
       {doc && (
         <>
-          <span className="text-ink-600">·</span>
+          <span style={{ color: '#36363c' }}>·</span>
           <span
-            className="text-sm font-serif text-ink-200 truncate max-w-xs"
+            className="text-sm font-serif truncate max-w-xs"
+            style={{ color: '#c8c8cc' }}
             title={doc.title}
           >
             {doc.title}
           </span>
+          {doc.filePath && (
+            <span className="text-[10px] font-sans truncate max-w-[160px] hidden md:block" style={{ color: '#48484f' }} title={doc.filePath}>
+              {doc.filePath.split('/').pop()}
+            </span>
+          )}
         </>
       )}
 
@@ -243,22 +267,23 @@ export function TitleBar({ store, onNewDoc, onImportPDF, onCloseDoc }: Props) {
       <OllamaDot status={store.ollamaStatus} model={store.ollamaActiveModel} />
 
       {/* Actions */}
-      <div className="flex items-center gap-2 titlebar-nodrag">
+      <div className="flex items-center gap-1.5 titlebar-nodrag">
         <button
           onClick={() => store.setSidebarOpen(!store.sidebarOpen)}
           title="Panel IA"
-          className={`px-3 py-1 rounded text-xs transition font-sans ${
-            store.sidebarOpen
-              ? 'bg-accent-600 text-white'
-              : 'bg-ink-700 hover:bg-ink-600 text-ink-200'
-          }`}
+          className="px-3 py-1 rounded text-xs transition font-sans"
+          style={{
+            background: store.sidebarOpen ? 'rgba(41,151,255,0.25)' : 'rgba(255,255,255,0.06)',
+            color: store.sidebarOpen ? '#60a5fa' : '#a0a0a8',
+          }}
         >
           IA
         </button>
         <button
           onClick={() => store.setShowSettings(true)}
           title="Ajustes (⌘,)"
-          className="px-2 py-1 rounded text-xs bg-ink-700 hover:bg-ink-600 text-ink-200 transition"
+          className="px-2 py-1 rounded text-xs transition"
+          style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }}
         >
           ⚙
         </button>

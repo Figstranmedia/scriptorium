@@ -12,12 +12,14 @@ interface Props {
   pageSize: PageSize
   frames: AnyLayoutFrame[]
   activePageIndex: number
+  spreadPages: number[]
   onScrollToPage: (pageIndex: number) => void
   onAddPage: (afterIndex: number) => void
   onDeletePage: (pageIndex: number) => void
+  onToggleSpread: (pageIndex: number) => void
 }
 
-export function PageStrip({ pageCount, pageSize, frames, activePageIndex, onScrollToPage, onAddPage, onDeletePage }: Props) {
+export function PageStrip({ pageCount, pageSize, frames, activePageIndex, spreadPages, onScrollToPage, onAddPage, onDeletePage, onToggleSpread }: Props) {
   const [contextPage, setContextPage] = useState<number | null>(null)
   const [contextPos, setContextPos] = useState({ x: 0, y: 0 })
 
@@ -91,13 +93,13 @@ export function PageStrip({ pageCount, pageSize, frames, activePageIndex, onScro
                 )
               })}
             </div>
-            {/* Page number */}
-            <span style={{
-              marginTop: 3,
-              fontSize: 9,
-              fontFamily: 'sans-serif',
-              color: isActive ? '#a5b4fc' : '#64748b',
-            }}>{i + 1}</span>
+            {/* Page number + spread badge */}
+            <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ fontSize: 9, fontFamily: 'sans-serif', color: isActive ? '#a5b4fc' : '#64748b' }}>{i + 1}</span>
+              {spreadPages.includes(i) && (
+                <span style={{ fontSize: 7, color: '#818cf8', fontFamily: 'sans-serif', background: 'rgba(99,102,241,0.15)', borderRadius: 2, padding: '0 2px' }}>⊞</span>
+              )}
+            </div>
           </div>
         )
       })}
@@ -128,47 +130,61 @@ export function PageStrip({ pageCount, pageSize, frames, activePageIndex, onScro
           pageIndex={contextPage}
           pageCount={pageCount}
           onClose={() => setContextPage(null)}
+          isSpread={spreadPages.includes(contextPage)}
           onInsertBefore={() => { onAddPage(contextPage - 1); setContextPage(null) }}
           onInsertAfter={() => { onAddPage(contextPage); setContextPage(null) }}
           onDelete={() => { onDeletePage(contextPage); setContextPage(null) }}
+          onToggleSpread={() => { onToggleSpread(contextPage); setContextPage(null) }}
         />
       )}
     </div>
   )
 }
 
-function PageContextMenu({ x, y, pageIndex, pageCount, onClose, onInsertBefore, onInsertAfter, onDelete }: {
-  x: number; y: number; pageIndex: number; pageCount: number
-  onClose: () => void; onInsertBefore: () => void; onInsertAfter: () => void; onDelete: () => void
+function PageContextMenu({ x, y, pageIndex, pageCount, isSpread, onClose, onInsertBefore, onInsertAfter, onDelete, onToggleSpread }: {
+  x: number; y: number; pageIndex: number; pageCount: number; isSpread: boolean
+  onClose: () => void; onInsertBefore: () => void; onInsertAfter: () => void
+  onDelete: () => void; onToggleSpread: () => void
 }) {
+  const items = [
+    { label: `Página ${pageIndex + 1}`, header: true },
+    { label: null },
+    { label: isSpread ? '⊟ Convertir a página suelta' : '⊞ Convertir a doble página', action: onToggleSpread },
+    { label: null },
+    { label: '↑ Insertar página antes', action: onInsertBefore },
+    { label: '↓ Insertar página después', action: onInsertAfter },
+    { label: null },
+    { label: '✕ Eliminar página', action: onDelete, danger: true, disabled: pageCount <= 1 },
+  ]
+
   return (
     <div
       style={{
         position: 'fixed', left: x, top: y,
-        background: '#1e293b', border: '1px solid #334155',
-        borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        zIndex: 9999, padding: '4px 0', minWidth: 180,
-        fontFamily: 'sans-serif',
+        background: '#222226', border: '1px solid rgba(255,255,255,0.1)',
+        borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        zIndex: 9999, padding: '4px 0', minWidth: 210,
+        fontFamily: 'system-ui, sans-serif',
       }}
       onMouseLeave={onClose}
     >
-      {[
-        { label: 'Insertar página antes', action: onInsertBefore },
-        { label: 'Insertar página después', action: onInsertAfter },
-        { label: null },
-        { label: 'Eliminar página', action: onDelete, danger: true, disabled: pageCount <= 1 },
-      ].map((item, i) => {
-        if (!item.label) return <div key={i} style={{ height: 1, background: '#334155', margin: '3px 0' }} />
+      {items.map((item, i) => {
+        if (!item.label) return <div key={i} style={{ height: 1, background: 'rgba(255,255,255,0.07)', margin: '3px 0' }} />
+        if ('header' in item && item.header) return (
+          <div key={i} style={{ padding: '4px 12px', fontSize: 10, color: '#48484f', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            {item.label}
+          </div>
+        )
         return (
           <div key={i}
             onClick={item.disabled ? undefined : item.action}
             style={{
-              padding: '5px 14px', fontSize: 12,
-              color: item.danger ? '#f87171' : '#e2e8f0',
+              padding: '6px 14px', fontSize: 12,
+              color: item.danger ? '#f87171' : '#c8c8cc',
               cursor: item.disabled ? 'default' : 'pointer',
               opacity: item.disabled ? 0.4 : 1,
             }}
-            onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = '#2d3f5a' }}
+            onMouseEnter={e => { if (!item.disabled) e.currentTarget.style.background = 'rgba(255,255,255,0.06)' }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
           >{item.label}</div>
         )

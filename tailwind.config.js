@@ -31,7 +31,20 @@ module.exports = {
           700: '#8a2f1a',
           800: '#6b2518',
           900: '#3d1510',
-        }
+        },
+        // Cool dark chrome — Affinity-style UI panels and toolbars
+        chrome: {
+          50:  '#f5f5f6',
+          100: '#e4e4e6',
+          200: '#c8c8cc',
+          300: '#a0a0a8',
+          400: '#6e6e78',
+          500: '#48484f',
+          600: '#36363c',
+          700: '#2c2c30',
+          800: '#222226',
+          900: '#18181b',
+        },
       }
     }
   },
