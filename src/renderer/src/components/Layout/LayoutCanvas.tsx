@@ -640,26 +640,11 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     await applyPDFImport(result.data, result.name)
   }, [applyPDFImport])
 
-  // Expose for drag-and-drop from DocSidebar and global menu
+  // Expose PDF data import for drag-and-drop from DocSidebar
   useEffect(() => {
     (window as any).__triggerPDFImportWithData = applyPDFImport
     return () => { delete (window as any).__triggerPDFImportWithData }
   }, [applyPDFImport])
-
-  useEffect(() => {
-    (window as any).__triggerPDFImport = handleImportPDF
-    return () => { delete (window as any).__triggerPDFImport }
-  }, [handleImportPDF])
-
-  useEffect(() => {
-    (window as any).__triggerPDFImportAsImages = handleImportPDFAsImages
-    return () => { delete (window as any).__triggerPDFImportAsImages }
-  }, [handleImportPDFAsImages])
-
-  useEffect(() => {
-    (window as any).__triggerDOCXImport = handleImportDOCX
-    return () => { delete (window as any).__triggerDOCXImport }
-  }, [handleImportDOCX])
 
   // ── DOCX Import ───────────────────────────────────────────────────────────────
   const handleImportDOCX = useCallback(async () => {
@@ -747,6 +732,22 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       setImporting(false)
     }
   }, [pageCount, pageSizeKey, saveLayout, pushHistory])
+
+  // Expose global menu triggers — MUST be after all handlers are declared
+  useEffect(() => {
+    (window as any).__triggerPDFImport = handleImportPDF
+    return () => { delete (window as any).__triggerPDFImport }
+  }, [handleImportPDF])
+
+  useEffect(() => {
+    (window as any).__triggerPDFImportAsImages = handleImportPDFAsImages
+    return () => { delete (window as any).__triggerPDFImportAsImages }
+  }, [handleImportPDFAsImages])
+
+  useEffect(() => {
+    (window as any).__triggerDOCXImport = handleImportDOCX
+    return () => { delete (window as any).__triggerDOCXImport }
+  }, [handleImportDOCX])
 
   // ── Context menu ─────────────────────────────────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent, frameId: string | null) => {
