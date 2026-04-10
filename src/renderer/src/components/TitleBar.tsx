@@ -3,8 +3,11 @@ import React, { useState, useEffect, useRef } from 'react'
 interface Props {
   store: any
   onNewDoc: () => void
+  onOpenFile?: () => void
   onSave?: () => void
   onSaveAs?: () => void
+  onShowInFinder?: () => void
+  onPrint?: () => void
   onImportPDF?: () => void
   onImportDOCX?: () => void
   onImportPDFAsImages?: () => void
@@ -100,7 +103,7 @@ function OllamaDot({ status, model }: { status: string; model: string }) {
 }
 
 // ─── Main TitleBar ────────────────────────────────────────────────────────────
-export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImportDOCX, onImportPDFAsImages, onCloseDoc, onToggleTheme }: Props) {
+export function TitleBar({ store, onNewDoc, onOpenFile, onSave, onSaveAs, onShowInFinder, onPrint, onImportPDF, onImportDOCX, onImportPDFAsImages, onCloseDoc, onToggleTheme }: Props) {
   const doc = store.activeDoc
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -122,12 +125,21 @@ export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImp
     .sort((a: any, b: any) => b.updatedAt - a.updatedAt)
     .slice(0, 5)
 
+  const hasFilePath = !!(doc as any)?.filePath
+
   const menuItems: MenuItem[] = [
+    // ── Nuevo / Abrir ──────────────────────────────────────────────────────────
     {
       type: 'item',
       label: 'Nuevo documento',
       shortcut: '⌘N',
       action: onNewDoc,
+    },
+    {
+      type: 'item',
+      label: 'Abrir…',
+      shortcut: '⌘O',
+      action: () => onOpenFile && onOpenFile(),
     },
     {
       type: 'submenu',
@@ -141,6 +153,7 @@ export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImp
         : [{ type: 'item' as const, label: 'Sin documentos recientes', disabled: true, action: () => {} }],
     },
     { type: 'separator' },
+    // ── Guardar ───────────────────────────────────────────────────────────────
     {
       type: 'item',
       label: 'Guardar',
@@ -156,6 +169,22 @@ export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImp
       action: () => onSaveAs && onSaveAs(),
     },
     { type: 'separator' },
+    // ── Finder / Imprimir ─────────────────────────────────────────────────────
+    {
+      type: 'item',
+      label: 'Mostrar en Finder',
+      disabled: !hasFilePath,
+      action: () => onShowInFinder && onShowInFinder(),
+    },
+    {
+      type: 'item',
+      label: 'Imprimir…',
+      shortcut: '⌘P',
+      disabled: !doc,
+      action: () => onPrint && onPrint(),
+    },
+    { type: 'separator' },
+    // ── Importar / Exportar ───────────────────────────────────────────────────
     {
       type: 'submenu',
       label: 'Importar',
@@ -197,17 +226,33 @@ export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImp
           disabled: !doc,
           action: () => store.setShowExport(true),
         },
+        {
+          type: 'item',
+          label: 'PNG (páginas)…',
+          disabled: !doc,
+          action: () => store.setShowExport(true),
+        },
+        {
+          type: 'item',
+          label: 'SVG / Affinity…',
+          disabled: !doc,
+          action: () => store.setShowExport(true),
+        },
+        {
+          type: 'item',
+          label: 'Word / DOCX…',
+          disabled: !doc,
+          action: () => store.setShowExport(true),
+        },
       ],
     },
     { type: 'separator' },
+    // ── Preferencias ─────────────────────────────────────────────────────────
     {
       type: 'item',
       label: 'Preferencias del documento',
       disabled: !doc,
-      action: () => {
-        // Opens new doc modal pre-populated — for now opens settings
-        store.setShowSettings(true)
-      },
+      action: () => store.setShowSettings(true),
     },
     {
       type: 'item',
@@ -216,9 +261,11 @@ export function TitleBar({ store, onNewDoc, onSave, onSaveAs, onImportPDF, onImp
       action: () => store.setShowSettings(true),
     },
     { type: 'separator' },
+    // ── Cerrar ────────────────────────────────────────────────────────────────
     {
       type: 'item',
       label: 'Cerrar documento',
+      shortcut: '⌘W',
       disabled: !doc,
       action: () => {
         if (doc) {

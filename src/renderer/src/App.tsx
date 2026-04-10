@@ -47,6 +47,9 @@ declare global {
       importPDF: () => Promise<{ data: string; name: string } | null>
       listFonts: () => Promise<string[]>
       aiDesign: (instruction: string, frameProps: object) => Promise<{ changes?: Record<string, unknown>; error?: string }>
+      openFile: () => Promise<{ data?: any; filePath?: string; canceled?: boolean; error?: string }>
+      showInFinder: (filePath: string) => Promise<{ success?: boolean }>
+      printDoc: () => Promise<{ success?: boolean; error?: string }>
     }
   }
 }
@@ -131,7 +134,7 @@ export default function App() {
     }
   }, [store])
 
-  // ⌘S / ⌘⇧S global shortcuts
+  // ⌘S / ⌘⇧S / ⌘O global shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -139,10 +142,14 @@ export default function App() {
         if (e.shiftKey) handleSaveAs()
         else handleSaveFile()
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
+        e.preventDefault()
+        handleOpenFile()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [handleSaveFile, handleSaveAs])
+  }, [handleSaveFile, handleSaveAs, handleOpenFile])
 
   const handleAIAction = useCallback((action: string, text: string) => {
     if (!text.trim()) return
@@ -164,6 +171,30 @@ export default function App() {
     if (insert) insert(text)
   }, [])
 
+  const handleOpenFile = useCallback(async () => {
+    const res = await window.api.openFile()
+    if (res.canceled || !res.data) return
+    if (res.error) { alert(res.error); return }
+    const doc = res.data as any
+    // Ensure the doc has a valid id and updatedAt
+    if (!doc.id) return
+    doc.filePath = res.filePath
+    doc.updatedAt = Date.now()
+    store.upsertDocument(doc)
+    store.setActiveDocId(doc.id)
+    await window.api.saveDocument(doc.id, doc)
+  }, [store])
+
+  const handleShowInFinder = useCallback(async () => {
+    const doc = store.activeDoc as any
+    if (!doc?.filePath) return
+    await window.api.showInFinder(doc.filePath)
+  }, [store])
+
+  const handlePrint = useCallback(async () => {
+    await window.api.printDoc()
+  }, [])
+
   const handleToggleTheme = useCallback(async () => {
     const next = store.theme === 'dark' ? 'light' : 'dark'
     store.setTheme(next)
@@ -179,8 +210,11 @@ export default function App() {
       <TitleBar
         store={store}
         onNewDoc={() => setShowNewDoc(true)}
+        onOpenFile={handleOpenFile}
         onSave={handleSaveFile}
         onSaveAs={handleSaveAs}
+        onShowInFinder={handleShowInFinder}
+        onPrint={handlePrint}
         onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
         onToggleTheme={handleToggleTheme}
       />

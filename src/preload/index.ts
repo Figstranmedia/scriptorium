@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('api', {
   deleteDocument: (id: string) => ipcRenderer.invoke('store:delete-document', id),
   saveDocumentAs: (title: string, data: object) => ipcRenderer.invoke('doc:save-as', title, data),
   saveDocumentToPath: (filePath: string, data: object) => ipcRenderer.invoke('doc:save-to-path', filePath, data),
+  openFile: () => ipcRenderer.invoke('doc:open-file'),
+  showInFinder: (filePath: string) => ipcRenderer.invoke('doc:show-in-finder', filePath),
+  printDoc: () => ipcRenderer.invoke('doc:print'),
 
   // Export
   exportPDF: (html: string, title: string) => ipcRenderer.invoke('export:pdf', html, title),

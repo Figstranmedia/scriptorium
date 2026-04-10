@@ -116,6 +116,35 @@ ipcMain.handle('doc:save-to-path', async (_event, filePath: string, data: object
   }
 })
 
+ipcMain.handle('doc:open-file', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Abrir documento Scriptorium…',
+    filters: [{ name: 'Scriptorium', extensions: ['scriptorium'] }],
+    properties: ['openFile'],
+  })
+  if (canceled || filePaths.length === 0) return { canceled: true }
+  const filePath = filePaths[0]
+  try {
+    const raw = readFileSync(filePath, 'utf-8')
+    const data = JSON.parse(raw)
+    return { data, filePath }
+  } catch (err: any) {
+    return { error: `No se pudo leer el archivo: ${err.message}` }
+  }
+})
+
+ipcMain.handle('doc:show-in-finder', async (_event, filePath: string) => {
+  shell.showItemInFolder(filePath)
+  return { success: true }
+})
+
+ipcMain.handle('doc:print', async () => {
+  const wins = BrowserWindow.getAllWindows()
+  if (wins.length === 0) return { error: 'Sin ventana activa' }
+  wins[0].webContents.print({ silent: false, printBackground: true })
+  return { success: true }
+})
+
 // ─── IPC: PDF Export ─────────────────────────────────────────────────────────
 ipcMain.handle('export:pdf', async (_event, html: string, title: string) => {
   const { canceled, filePath } = await dialog.showSaveDialog({

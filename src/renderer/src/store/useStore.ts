@@ -146,6 +146,13 @@ export function useStore() {
     )
   }, [])
 
+  const upsertDocument = useCallback((doc: Document) => {
+    setDocuments(prev => {
+      const exists = prev.some(d => d.id === doc.id)
+      return exists ? prev.map(d => d.id === doc.id ? { ...d, ...doc } : d) : [...prev, doc]
+    })
+  }, [])
+
   const deleteDocument = useCallback((id: string) => {
     setDocuments(prev => {
       const next = prev.filter(d => d.id !== id)
@@ -160,6 +167,7 @@ export function useStore() {
     documents, setDocuments,
     activeDocId, setActiveDocId,
     activeDoc,
+    upsertDocument,
     sidebarOpen, setSidebarOpen,
     sidebarTab, setSidebarTab,
     browserUrl, setBrowserUrl,
