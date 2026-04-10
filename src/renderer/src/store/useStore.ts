@@ -117,6 +117,7 @@ export function useStore() {
   const [ollamaStatus, setOllamaStatus] = useState<'idle' | 'checking' | 'online' | 'offline'>('idle')
   const [ollamaActiveModel, setOllamaActiveModel] = useState('')
   const [pendingChatMessage, setPendingChatMessage] = useState<{ text: string; action: string } | null>(null)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
 
   const activeDoc = documents.find(d => d.id === activeDocId) || null
 
@@ -170,6 +171,7 @@ export function useStore() {
     ollamaStatus, setOllamaStatus,
     ollamaActiveModel, setOllamaActiveModel,
     pendingChatMessage, setPendingChatMessage,
+    theme, setTheme,
     createDocument,
     updateDocument,
     deleteDocument,

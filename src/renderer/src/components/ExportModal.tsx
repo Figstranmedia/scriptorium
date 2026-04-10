@@ -12,6 +12,7 @@ import { mmToPx } from './Layout/LayoutPage'
 import type { Document, CitationStyle } from '../store/useStore'
 import type { AnyLayoutFrame } from '../lib/threadEngine'
 import { isImageFrame } from '../lib/threadEngine'
+import { framesToDocxData } from '../lib/docxExport'
 
 interface Props {
   document: Document
@@ -19,7 +20,7 @@ interface Props {
 }
 
 type ExportTab = 'write' | 'layout'
-type ExportFormat = 'pdf' | 'png' | 'svg'
+type ExportFormat = 'pdf' | 'png' | 'svg' | 'docx'
 
 const PAGE_SIZES = ['A4', 'Letter', 'A5', 'Legal'] as const
 const CITATION_STYLES: { id: CitationStyle; label: string }[] = [
@@ -131,6 +132,13 @@ export function ExportModal({ document, onClose }: Props) {
     } else if (format === 'png') {
       const pages = buildPageHTMLs(document, layoutOpts)
       const res = await window.api.exportPNGPages(pages, document.title)
+      setExporting(false)
+      if (res?.canceled) { onClose(); return }
+      setResult(res)
+    } else if (format === 'docx') {
+      // DOCX export
+      const framesData = framesToDocxData((document.layoutFrames || []) as AnyLayoutFrame[])
+      const res = await window.api.exportDocx(framesData, document.title)
       setExporting(false)
       if (res?.canceled) { onClose(); return }
       setResult(res)
@@ -287,9 +295,10 @@ export function ExportModal({ document, onClose }: Props) {
               </label>
               <div className="flex gap-2">
                 {([
-                  { id: 'pdf', label: '📄 PDF' },
-                  { id: 'png', label: '🖼 PNG' },
-                  { id: 'svg', label: '🎨 SVG / Affinity' },
+                  { id: 'pdf',  label: '📄 PDF' },
+                  { id: 'png',  label: '🖼 PNG' },
+                  { id: 'svg',  label: '🎨 SVG' },
+                  { id: 'docx', label: '📝 DOCX' },
                 ] as { id: ExportFormat; label: string }[]).map(f => (
                   <button key={f.id} onClick={() => setFormat(f.id)}
                     className="flex-1 py-2 rounded text-xs font-sans transition"
@@ -310,6 +319,11 @@ export function ExportModal({ document, onClose }: Props) {
               {format === 'svg' && (
                 <p className="mt-1.5 text-xs font-sans" style={{ color: '#6b7280' }}>
                   SVG vectorial compatible con Affinity Designer 2. Formas y gráficos como capas editables.
+                </p>
+              )}
+              {format === 'docx' && (
+                <p className="mt-1.5 text-xs font-sans" style={{ color: '#6b7280' }}>
+                  Word / LibreOffice. Exporta el texto de los marcos de texto en orden de lectura (página, posición vertical).
                 </p>
               )}
             </div>
@@ -410,7 +424,9 @@ export function ExportModal({ document, onClose }: Props) {
                   ? `⬇ Exportar ${pageCount} PNG${pageCount !== 1 ? 's' : ''}`
                   : format === 'svg' && isLayout
                     ? `⬇ Exportar ${pageCount} SVG${pageCount !== 1 ? 's' : ''}`
-                    : '⬇ Exportar PDF'}
+                    : format === 'docx' && isLayout
+                      ? '⬇ Exportar DOCX'
+                      : '⬇ Exportar PDF'}
             </button>
           )}
         </div>

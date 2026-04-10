@@ -434,6 +434,7 @@ function HistorialPanel({ labels, currentIndex, onJumpTo }: HistorialProps) {
 // ─── Main StudioSidebar ───────────────────────────────────────────────────────
 
 export interface StudioSidebarProps {
+  width?: number
   // Selection
   selectedFrame: AnyLayoutFrame | null
   selectedFrameIds: string[]
@@ -466,6 +467,7 @@ export interface StudioSidebarProps {
 }
 
 export function StudioSidebar({
+  width = 220,
   selectedFrame, selectedFrameIds, frames, currentPageIndex, pageCount,
   paragraphStyles, onUpdateStyles, onApplyStyle,
   onUpdateFrame, onDeleteFrame, onSelectFrame, onUnlink, onAlign,
@@ -490,7 +492,7 @@ export function StudioSidebar({
 
   return (
     <div style={{
-      width: 220, flexShrink: 0,
+      width, flexShrink: 0,
       display: 'flex', flexDirection: 'column',
       background: BG,
       borderLeft: `1px solid ${BORDER}`,

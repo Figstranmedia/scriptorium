@@ -2,6 +2,36 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Dark theme (default) */
+  --app-bg:        #0e0e10;
+  --app-surface:   #18181b;
+  --app-surface-2: #1e1f23;
+  --app-border:    rgba(255,255,255,0.07);
+  --app-text:      #e4e4e6;
+  --app-text-muted: #6b7280;
+  --app-text-dim:  #3a3c44;
+  --tab-active-bg: #1e1f23;
+  --tab-active-border: #d4522b;
+  --scrollbar-thumb: #3a3c44;
+  --accent: #d4522b;
+}
+
+[data-theme="light"] {
+  --app-bg:        #dde3ea;
+  --app-surface:   #f0f2f5;
+  --app-surface-2: #ffffff;
+  --app-border:    rgba(0,0,0,0.09);
+  --app-text:      #1e293b;
+  --app-text-muted: #64748b;
+  --app-text-dim:  #94a3b8;
+  --tab-active-bg: #ffffff;
+  --tab-active-border: #d4522b;
+  --scrollbar-thumb: #c0c8d4;
+  --accent: #d4522b;
+}
+
 * {
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
@@ -25,8 +55,8 @@ html, body, #root {
 /* ── Scrollbars ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c8bfad; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #a09080; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--app-text-muted); }
 
 /* ── TipTap editor ── */
 .ProseMirror {

@@ -245,6 +245,109 @@ ipcMain.handle('export:layout-svg', async (_event, svgPages: Array<{ svg: string
   }
 })
 
+// ─── IPC: DOCX export ────────────────────────────────────────────────────────
+ipcMain.handle('export:docx', async (_event, frames: any[], title: string) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Exportar como DOCX',
+    defaultPath: `${title || 'documento'}.docx`,
+    filters: [{ name: 'Word Document', extensions: ['docx'] }],
+  })
+  if (canceled || !filePath) return { canceled: true }
+
+  try {
+    const {
+      Document, Packer, Paragraph, TextRun, HeadingLevel,
+      AlignmentType, PageBreak,
+    } = await import('docx')
+
+    const children: any[] = []
+    let currentPage = -1
+
+    for (const frame of frames) {
+      // Page break between pages
+      if (frame.pageIndex !== currentPage && currentPage >= 0) {
+        children.push(new Paragraph({ children: [new PageBreak()] }))
+      }
+      currentPage = frame.pageIndex
+
+      if (frame.type !== 'text' || !frame.content) continue
+
+      const lines = frame.content.split('\n').filter((l: string) => l.trim())
+      for (const line of lines) {
+        const isBold   = frame.fontWeight === 'bold'
+        const isItalic = frame.fontStyle === 'italic'
+        const fontSize = Math.round((frame.fontSize ?? 12) * 2) // half-points
+
+        const alignMap: Record<string, AlignmentType> = {
+          left:    AlignmentType.LEFT,
+          center:  AlignmentType.CENTER,
+          right:   AlignmentType.RIGHT,
+          justify: AlignmentType.JUSTIFIED,
+        }
+        const alignment = alignMap[frame.textAlign ?? 'left'] ?? AlignmentType.LEFT
+
+        children.push(new Paragraph({
+          alignment,
+          children: [
+            new TextRun({
+              text: line,
+              bold: isBold,
+              italics: isItalic,
+              size: fontSize,
+            }),
+          ],
+        }))
+      }
+    }
+
+    if (children.length === 0) {
+      children.push(new Paragraph({ children: [new TextRun({ text: '' })] }))
+    }
+
+    const doc = new Document({ sections: [{ children }] })
+    const buffer = await Packer.toBuffer(doc)
+    writeFileSync(filePath, buffer)
+    return { success: true, filePath }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
+// ─── IPC: DOCX Import (mammoth) ──────────────────────────────────────────────
+ipcMain.handle('import:docx', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Importar documento Word',
+    properties: ['openFile'],
+    filters: [{ name: 'Word Document', extensions: ['docx', 'doc'] }],
+  })
+  if (canceled || !filePaths[0]) return null
+  try {
+    const mammoth = await import('mammoth')
+    const result = await mammoth.convertToHtml({ path: filePaths[0] })
+    const name = filePaths[0].split('/').pop()?.replace(/\.docx?$/i, '') || 'Documento'
+    return { html: result.value, name, warnings: result.messages?.map((m: any) => m.message) || [] }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
+// ─── IPC: AI Image Generator (Pollinations.ai — no API key needed) ────────────
+ipcMain.handle('ai:generate-image', async (_event, prompt: string, width: number, height: number, model: string) => {
+  try {
+    const seed = Math.floor(Math.random() * 999999)
+    const encodedPrompt = encodeURIComponent(prompt)
+    const url = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&model=${model}&nologo=true&seed=${seed}`
+    const response = await fetch(url, { signal: AbortSignal.timeout(60000) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    const buffer = await response.arrayBuffer()
+    const base64 = Buffer.from(buffer).toString('base64')
+    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    return { success: true, dataUrl: `data:${contentType};base64,${base64}` }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
 // ─── IPC: Fonts ──────────────────────────────────────────────────────────────
 ipcMain.handle('fonts:list', async () => {
   try {

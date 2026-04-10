@@ -21,6 +21,15 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('export:png-pages', pages, title),
   exportLayoutSVG: (svgPages: Array<{svg: string; pageIndex: number}>, title: string) =>
     ipcRenderer.invoke('export:layout-svg', svgPages, title),
+  exportDocx: (frames: any[], title: string) =>
+    ipcRenderer.invoke('export:docx', frames, title),
+
+  // Import
+  importDOCX: () => ipcRenderer.invoke('import:docx'),
+
+  // AI Image
+  aiGenerateImage: (prompt: string, width: number, height: number, model: string) =>
+    ipcRenderer.invoke('ai:generate-image', prompt, width, height, model),
 
   // Images
   pickImage: () => ipcRenderer.invoke('image:pick'),

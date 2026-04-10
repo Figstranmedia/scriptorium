@@ -1,8 +1,17 @@
-import React from 'react'
+import React, { useState } from 'react'
 import type { LayoutFrame, LayoutImageFrame, LayoutShapeFrame, LayoutChartFrame, AnyLayoutFrame } from '../../lib/threadEngine'
 import { isImageFrame, isShapeFrame, isChartFrame } from '../../lib/threadEngine'
 import { FontPicker } from './FontPicker'
 import type { ParagraphStyle } from '../../store/useStore'
+
+// ─── Design tokens (dark panel) ───────────────────────────────────────────────
+const BG       = '#1a1b1e'
+const ROW_BG   = '#2d2f36'
+const BORDER   = 'rgba(255,255,255,0.07)'
+const ACCENT   = '#d4522b'
+const TEXT     = '#e2e2e6'
+const MUTED    = '#6b7280'
+const LABEL    = '#9ca3af'
 
 interface Props {
   frame: AnyLayoutFrame | null
@@ -12,359 +21,407 @@ interface Props {
   onApplyStyle?: (frameId: string, style: ParagraphStyle) => void
 }
 
-function NumField({ label, value, min, max, step = 1, onChange }: {
-  label: string; value: number; min: number; max: number; step?: number
+// ─── Shared field components ─────────────────────────────────────────────────
+function NumField({ label, value, min, max, step = 1, onChange, unit }: {
+  label: string; value: number; min: number; max: number; step?: number; unit?: string
   onChange: (v: number) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <label className="text-[10px] text-slate-400 font-sans shrink-0">{label}</label>
-      <input
-        type="number" min={min} max={max} step={step} value={Math.round(value * 10) / 10}
-        onChange={e => onChange(Number(e.target.value))}
-        className="w-16 text-xs text-right px-1.5 py-0.5 border border-slate-200 rounded outline-none focus:border-indigo-400 font-sans bg-white"
-      />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
+      <label style={{ fontSize: 10, color: LABEL, fontFamily: 'Figtree, sans-serif', flexShrink: 0 }}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <input
+          type="number" min={min} max={max} step={step} value={Math.round(value * 100) / 100}
+          onChange={e => onChange(Number(e.target.value))}
+          style={{ width: 52, textAlign: 'right', padding: '2px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', fontFamily: 'Figtree, sans-serif' }}
+        />
+        {unit && <span style={{ fontSize: 9, color: MUTED }}>{unit}</span>}
+      </div>
     </div>
   )
 }
 
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+function ColorFieldDark({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const safe = value && value !== 'transparent' ? value : '#e2e8f0'
   return (
-    <div className="flex items-center justify-between gap-2">
-      <label className="text-[10px] text-slate-400 font-sans shrink-0">{label}</label>
-      <div className="flex items-center gap-1.5">
-        <input type="color" value={value || '#1a1714'} onChange={e => onChange(e.target.value)}
-          className="w-7 h-6 cursor-pointer border border-slate-200 rounded" />
-        <input type="text" value={value || '#1a1714'} onChange={e => onChange(e.target.value)}
-          className="w-20 text-xs px-1.5 py-0.5 border border-slate-200 rounded outline-none focus:border-indigo-400 font-sans bg-white" />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 }}>
+      <label style={{ fontSize: 10, color: LABEL, fontFamily: 'Figtree, sans-serif', flexShrink: 0 }}>{label}</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ position: 'relative', width: 22, height: 22, borderRadius: 4, border: `1px solid ${BORDER}`, overflow: 'hidden', background: value === 'transparent' ? 'repeating-conic-gradient(#444 0% 25%,#2a2a2a 0% 50%) 0 0 / 6px 6px' : value }}>
+          <input type="color" value={safe} onChange={e => onChange(e.target.value)}
+            style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} />
+        </div>
+        <input type="text" value={value || ''} onChange={e => onChange(e.target.value)}
+          style={{ width: 62, fontSize: 10, padding: '2px 5px', background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', fontFamily: 'monospace' }} />
       </div>
+    </div>
+  )
+}
+
+// ─── Accordion section ────────────────────────────────────────────────────────
+function Accordion({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div style={{ borderBottom: `1px solid ${BORDER}` }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '6px 10px', background: 'rgba(255,255,255,0.03)', border: 'none', cursor: 'pointer',
+          fontFamily: 'Figtree, sans-serif', fontSize: 10, fontWeight: 600, color: MUTED,
+          letterSpacing: '0.07em', textTransform: 'uppercase',
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ fontSize: 8, color: MUTED, transition: 'transform 0.15s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</span>
+      </button>
+      {open && (
+        <div style={{ padding: '6px 10px 10px', display: 'flex', flexDirection: 'column' }}>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
 
 function isStyleOverridden(tf: LayoutFrame, style: ParagraphStyle): boolean {
   return (
-    tf.fontFamily !== style.fontFamily ||
-    tf.fontSize !== style.fontSize ||
-    tf.lineHeight !== style.lineHeight ||
-    tf.fontWeight !== style.fontWeight ||
-    tf.fontStyle !== style.fontStyle ||
-    tf.textAlign !== style.textAlign ||
-    tf.textColor !== style.textColor ||
-    (tf.letterSpacing || 0) !== style.letterSpacing
+    tf.fontFamily !== style.fontFamily || tf.fontSize !== style.fontSize ||
+    tf.lineHeight !== style.lineHeight || tf.fontWeight !== style.fontWeight ||
+    tf.fontStyle !== style.fontStyle || tf.textAlign !== style.textAlign ||
+    tf.textColor !== style.textColor || (tf.letterSpacing || 0) !== style.letterSpacing
   )
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
 export function LayoutPropertiesPanel({ frame, styles = [], onUpdate, onUnlink, onApplyStyle }: Props) {
   if (!frame) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center px-4">
-        <p className="text-xs text-slate-400 font-sans">Selecciona un marco para ver sus propiedades</p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 16 }}>
+        <p style={{ fontSize: 11, color: MUTED, fontFamily: 'Figtree, sans-serif', textAlign: 'center' }}>
+          Selecciona un marco
+        </p>
       </div>
     )
   }
 
   const upd = (updates: Partial<AnyLayoutFrame>) => onUpdate(frame.id, updates)
 
+  // ── Chart frame ─────────────────────────────────────────────────────────────
   if (isChartFrame(frame)) {
     const cf = frame as LayoutChartFrame
-    const CHART_TYPES = [
-      { value: 'bar', label: '▊ Barras' },
-      { value: 'line', label: '📈 Líneas' },
-      { value: 'area', label: '◼ Área' },
-      { value: 'pie', label: '◑ Torta' },
-      { value: 'scatter', label: '⋯ Disp.' },
+    const TYPES = [
+      { v: 'bar', l: '▊' }, { v: 'line', l: '📈' }, { v: 'area', l: '◼' },
+      { v: 'pie', l: '◑' }, { v: 'scatter', l: '⋯' },
     ] as const
     return (
-      <div className="p-3 space-y-3 overflow-y-auto">
-        <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">📊 Gráfico</p>
-        <div>
-          <label className="text-[10px] text-slate-400 font-sans block mb-1">Tipo</label>
-          <div className="flex flex-wrap gap-1">
-            {CHART_TYPES.map(t => (
-              <button key={t.value} onClick={() => upd({ chartType: t.value } as Partial<LayoutChartFrame>)}
-                className={`px-2 py-1 rounded text-[10px] font-sans border transition ${cf.chartType === t.value ? 'border-amber-400 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-400'}`}>
-                {t.label}
+      <div style={{ background: BG, fontSize: 11, fontFamily: 'Figtree, sans-serif', color: TEXT }}>
+        <Accordion title="Posición y tamaño">
+          <NumField label="X" value={cf.x} min={0} max={2000} onChange={v => upd({ x: v })} unit="px" />
+          <NumField label="Y" value={cf.y} min={0} max={3000} onChange={v => upd({ y: v })} unit="px" />
+          <NumField label="Ancho" value={cf.width} min={80} max={2000} onChange={v => upd({ width: v })} unit="px" />
+          <NumField label="Alto" value={cf.height} min={60} max={3000} onChange={v => upd({ height: v })} unit="px" />
+        </Accordion>
+        <Accordion title="Tipo de gráfico">
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {TYPES.map(t => (
+              <button key={t.v} onClick={() => upd({ chartType: t.v } as any)}
+                style={{ flex: 1, padding: '5px 2px', borderRadius: 5, border: `1px solid ${cf.chartType === t.v ? ACCENT : BORDER}`, background: cf.chartType === t.v ? 'rgba(212,82,43,0.15)' : ROW_BG, color: cf.chartType === t.v ? ACCENT : MUTED, cursor: 'pointer', fontSize: 12 }}>
+                {t.l}
               </button>
             ))}
           </div>
-        </div>
-        <NumField label="X" value={cf.x} min={0} max={2000} onChange={v => upd({ x: v })} />
-        <NumField label="Y" value={cf.y} min={0} max={3000} onChange={v => upd({ y: v })} />
-        <NumField label="Ancho" value={cf.width} min={80} max={2000} onChange={v => upd({ width: v })} />
-        <NumField label="Alto" value={cf.height} min={60} max={3000} onChange={v => upd({ height: v })} />
-        <NumField label="Opacidad" value={cf.opacity * 100} min={0} max={100}
-          onChange={v => upd({ opacity: v / 100 } as Partial<LayoutChartFrame>)} />
-        <NumField label="Z-index" value={cf.zIndex} min={0} max={100}
-          onChange={v => upd({ zIndex: v } as Partial<LayoutChartFrame>)} />
-        <div className="text-[10px] text-slate-400 font-sans pt-1">
-          Doble clic sobre el gráfico para editar datos.
-        </div>
+          <div style={{ marginTop: 8, fontSize: 10, color: MUTED }}>Doble clic → editar datos</div>
+        </Accordion>
+        <Accordion title="Capa">
+          <NumField label="Opacidad" value={cf.opacity * 100} min={0} max={100} onChange={v => upd({ opacity: v / 100 } as any)} unit="%" />
+          <NumField label="Z-order" value={cf.zIndex} min={0} max={100} onChange={v => upd({ zIndex: v } as any)} />
+        </Accordion>
       </div>
     )
   }
 
+  // ── Shape frame ──────────────────────────────────────────────────────────────
   if (isShapeFrame(frame)) {
     const sf = frame as LayoutShapeFrame
-    const shapeLabel = sf.shapeType === 'rect' ? '▭ Rectángulo' : sf.shapeType === 'ellipse' ? '◯ Elipse' : '╱ Línea'
     return (
-      <div className="p-3 space-y-3 overflow-y-auto">
-        <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">{shapeLabel}</p>
-
-        {/* Shape type selector */}
-        <div>
-          <label className="text-[10px] text-slate-400 font-sans block mb-1">Tipo de forma</label>
-          <div className="flex gap-1">
+      <div style={{ background: BG, fontSize: 11, fontFamily: 'Figtree, sans-serif', color: TEXT }}>
+        <Accordion title="Posición y tamaño">
+          <NumField label="X" value={sf.x} min={0} max={2000} onChange={v => upd({ x: v })} unit="px" />
+          <NumField label="Y" value={sf.y} min={0} max={3000} onChange={v => upd({ y: v })} unit="px" />
+          <NumField label="Ancho" value={sf.width} min={10} max={2000} onChange={v => upd({ width: v })} unit="px" />
+          {sf.shapeType !== 'line' && <NumField label="Alto" value={sf.height} min={10} max={3000} onChange={v => upd({ height: v })} unit="px" />}
+        </Accordion>
+        <Accordion title="Forma">
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
             {(['rect', 'ellipse', 'line'] as const).map(t => (
-              <button key={t} onClick={() => upd({ shapeType: t } as Partial<LayoutShapeFrame>)}
-                className={`flex-1 py-1 rounded text-[10px] font-sans border transition ${sf.shapeType === t ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400'}`}>
+              <button key={t} onClick={() => upd({ shapeType: t } as any)}
+                style={{ flex: 1, padding: '4px 0', borderRadius: 5, border: `1px solid ${sf.shapeType === t ? '#059669' : BORDER}`, background: sf.shapeType === t ? 'rgba(5,150,105,0.15)' : ROW_BG, color: sf.shapeType === t ? '#34d399' : MUTED, cursor: 'pointer', fontSize: 13 }}>
                 {t === 'rect' ? '▭' : t === 'ellipse' ? '◯' : '╱'}
               </button>
             ))}
           </div>
-        </div>
-
-        <NumField label="X" value={sf.x} min={0} max={2000} onChange={v => upd({ x: v })} />
-        <NumField label="Y" value={sf.y} min={0} max={3000} onChange={v => upd({ y: v })} />
-        <NumField label="Ancho" value={sf.width} min={10} max={2000} onChange={v => upd({ width: v })} />
-        {sf.shapeType !== 'line' && (
-          <NumField label="Alto" value={sf.height} min={10} max={3000} onChange={v => upd({ height: v })} />
-        )}
-
-        <ColorField label="Relleno" value={sf.fillColor || 'transparent'}
-          onChange={v => upd({ fillColor: v } as Partial<LayoutShapeFrame>)} />
-        <ColorField label="Borde" value={sf.strokeColor || '#64748b'}
-          onChange={v => upd({ strokeColor: v } as Partial<LayoutShapeFrame>)} />
-        <NumField label="Grosor borde" value={sf.strokeWidth} min={0} max={20} step={0.5}
-          onChange={v => upd({ strokeWidth: v } as Partial<LayoutShapeFrame>)} />
-
-        <div>
-          <label className="text-[10px] text-slate-400 font-sans block mb-1">Estilo de borde</label>
-          <div className="flex gap-1">
-            {(['solid', 'dashed', 'dotted'] as const).map(s => (
-              <button key={s} onClick={() => upd({ strokeStyle: s } as Partial<LayoutShapeFrame>)}
-                className={`flex-1 py-1 rounded text-[10px] font-sans border transition ${sf.strokeStyle === s ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400'}`}>
-                {s === 'solid' ? '—' : s === 'dashed' ? '- -' : '···'}
-              </button>
-            ))}
+          <ColorFieldDark label="Relleno" value={sf.fillColor || 'transparent'} onChange={v => upd({ fillColor: v } as any)} />
+          <ColorFieldDark label="Borde" value={sf.strokeColor || '#64748b'} onChange={v => upd({ strokeColor: v } as any)} />
+          <NumField label="Grosor borde" value={sf.strokeWidth} min={0} max={20} step={0.5} onChange={v => upd({ strokeWidth: v } as any)} unit="px" />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <label style={{ fontSize: 10, color: LABEL, flexShrink: 0 }}>Estilo borde</label>
+            <div style={{ display: 'flex', gap: 3, marginLeft: 'auto' }}>
+              {(['solid', 'dashed', 'dotted'] as const).map(s => (
+                <button key={s} onClick={() => upd({ strokeStyle: s } as any)}
+                  style={{ padding: '2px 6px', borderRadius: 4, border: `1px solid ${sf.strokeStyle === s ? '#059669' : BORDER}`, background: sf.strokeStyle === s ? 'rgba(5,150,105,0.15)' : ROW_BG, color: sf.strokeStyle === s ? '#34d399' : MUTED, cursor: 'pointer', fontSize: 10 }}>
+                  {s === 'solid' ? '—' : s === 'dashed' ? '- -' : '···'}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-
-        {sf.shapeType === 'rect' && (
-          <NumField label="Radio esquina" value={sf.cornerRadius} min={0} max={200}
-            onChange={v => upd({ cornerRadius: v } as Partial<LayoutShapeFrame>)} />
-        )}
-        <NumField label="Opacidad" value={sf.opacity * 100} min={0} max={100}
-          onChange={v => upd({ opacity: v / 100 } as Partial<LayoutShapeFrame>)} />
-        <NumField label="Z-index" value={sf.zIndex} min={0} max={100}
-          onChange={v => upd({ zIndex: v } as Partial<LayoutShapeFrame>)} />
+          {sf.shapeType === 'rect' && <NumField label="Radio esquina" value={sf.cornerRadius} min={0} max={200} onChange={v => upd({ cornerRadius: v } as any)} unit="px" />}
+        </Accordion>
+        <Accordion title="Capa">
+          <NumField label="Opacidad" value={sf.opacity * 100} min={0} max={100} onChange={v => upd({ opacity: v / 100 } as any)} unit="%" />
+          <NumField label="Z-order" value={sf.zIndex} min={0} max={100} onChange={v => upd({ zIndex: v } as any)} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+            <label style={{ fontSize: 10, color: LABEL }}>Bloqueado</label>
+            <button onClick={() => upd({ locked: !sf.locked } as any)}
+              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: `1px solid ${sf.locked ? '#d97706' : BORDER}`, background: sf.locked ? 'rgba(217,119,6,0.15)' : ROW_BG, color: sf.locked ? '#fbbf24' : MUTED, cursor: 'pointer' }}>
+              {sf.locked ? '🔒 Sí' : '🔓 No'}
+            </button>
+          </div>
+        </Accordion>
       </div>
     )
   }
 
+  // ── Image frame ──────────────────────────────────────────────────────────────
   if (isImageFrame(frame)) {
     const imgF = frame as LayoutImageFrame
     return (
-      <div className="p-3 space-y-3 overflow-y-auto">
-        <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">🖼 Marco de imagen</p>
-        <NumField label="X" value={imgF.x} min={0} max={2000} onChange={v => upd({ x: v })} />
-        <NumField label="Y" value={imgF.y} min={0} max={3000} onChange={v => upd({ y: v })} />
-        <NumField label="Ancho" value={imgF.width} min={40} max={2000} onChange={v => upd({ width: v })} />
-        <NumField label="Alto" value={imgF.height} min={30} max={3000} onChange={v => upd({ height: v })} />
-        <div>
-          <label className="text-[10px] text-slate-400 font-sans block mb-1">Ajuste</label>
-          <div className="flex gap-1">
+      <div style={{ background: BG, fontSize: 11, fontFamily: 'Figtree, sans-serif', color: TEXT }}>
+        <Accordion title="Posición y tamaño">
+          <NumField label="X" value={imgF.x} min={0} max={2000} onChange={v => upd({ x: v })} unit="px" />
+          <NumField label="Y" value={imgF.y} min={0} max={3000} onChange={v => upd({ y: v })} unit="px" />
+          <NumField label="Ancho" value={imgF.width} min={40} max={2000} onChange={v => upd({ width: v })} unit="px" />
+          <NumField label="Alto" value={imgF.height} min={30} max={3000} onChange={v => upd({ height: v })} unit="px" />
+        </Accordion>
+        <Accordion title="Imagen">
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
             {(['fit', 'fill', 'crop'] as const).map(f => (
               <button key={f} onClick={() => upd({ fit: f })}
-                className={`flex-1 py-1 rounded text-[10px] font-sans border transition ${imgF.fit === f ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-400'}`}>
+                style={{ flex: 1, padding: '4px 0', borderRadius: 5, border: `1px solid ${imgF.fit === f ? ACCENT : BORDER}`, background: imgF.fit === f ? 'rgba(212,82,43,0.15)' : ROW_BG, color: imgF.fit === f ? ACCENT : MUTED, cursor: 'pointer', fontSize: 10 }}>
                 {f}
               </button>
             ))}
           </div>
-        </div>
-        <div>
-          <label className="text-[10px] text-slate-400 font-sans block mb-1">Leyenda</label>
-          <input type="text" value={imgF.caption}
+          <input
+            type="text" value={imgF.caption || ''} placeholder="Leyenda..."
             onChange={e => upd({ caption: e.target.value })}
-            className="w-full text-xs px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-400 font-sans"
-            placeholder="Descripción de la imagen..." />
-        </div>
+            style={{ width: '100%', padding: '4px 8px', fontSize: 10, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', fontFamily: 'Figtree, sans-serif', boxSizing: 'border-box' }}
+          />
+        </Accordion>
+        <Accordion title="Apariencia">
+          <ColorFieldDark label="Borde color" value={imgF.borderColor || 'transparent'} onChange={v => upd({ borderColor: v })} />
+          <NumField label="Borde grosor" value={imgF.borderWidth || 0} min={0} max={20} onChange={v => upd({ borderWidth: v })} unit="px" />
+          <NumField label="Radio esquina" value={imgF.cornerRadius || 0} min={0} max={200} onChange={v => upd({ cornerRadius: v })} unit="px" />
+        </Accordion>
+        <Accordion title="Capa">
+          <NumField label="Opacidad" value={(imgF.opacity ?? 1) * 100} min={0} max={100} onChange={v => upd({ opacity: v / 100 })} unit="%" />
+          <NumField label="Z-order" value={imgF.zIndex || 10} min={0} max={100} onChange={v => upd({ zIndex: v })} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+            <label style={{ fontSize: 10, color: LABEL }}>Bloqueado</label>
+            <button onClick={() => upd({ locked: !imgF.locked })}
+              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: `1px solid ${imgF.locked ? '#d97706' : BORDER}`, background: imgF.locked ? 'rgba(217,119,6,0.15)' : ROW_BG, color: imgF.locked ? '#fbbf24' : MUTED, cursor: 'pointer' }}>
+              {imgF.locked ? '🔒 Sí' : '🔓 No'}
+            </button>
+          </div>
+        </Accordion>
       </div>
     )
   }
 
+  // ── Text frame ───────────────────────────────────────────────────────────────
   const tf = frame as LayoutFrame
   const appliedStyle = styles.find(s => s.id === tf.paragraphStyleId)
   const overridden = appliedStyle ? isStyleOverridden(tf, appliedStyle) : false
 
   return (
-    <div className="p-3 space-y-3 overflow-y-auto text-slate-700">
-      <p className="text-[10px] font-sans font-semibold text-slate-500 uppercase tracking-wider">Marco de texto</p>
+    <div style={{ background: BG, fontSize: 11, fontFamily: 'Figtree, sans-serif', color: TEXT }}>
 
-      {/* Paragraph style selector */}
-      {styles.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Estilo de párrafo</p>
-          <div className="flex items-center gap-1.5">
-            <select
-              value={tf.paragraphStyleId || ''}
-              onChange={e => {
-                const style = styles.find(s => s.id === e.target.value)
-                if (style && onApplyStyle) onApplyStyle(tf.id, style)
-                else onUpdate(tf.id, { paragraphStyleId: e.target.value || undefined } as Partial<LayoutFrame>)
-              }}
-              className="flex-1 text-xs px-2 py-1 border border-slate-200 rounded outline-none focus:border-indigo-400 font-sans bg-white"
-            >
-              <option value="">— Sin estilo —</option>
-              {styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            {overridden && (
-              <span
-                title="Propiedades modificadas desde el estilo base. Clic para restablecer."
-                onClick={() => { if (appliedStyle && onApplyStyle) onApplyStyle(tf.id, appliedStyle) }}
-                className="text-orange-400 text-xs cursor-pointer hover:text-orange-300 transition"
-                style={{ fontFamily: 'sans-serif' }}
-              >+</span>
-            )}
-          </div>
+      {/* Posición y tamaño */}
+      <Accordion title="Posición y tamaño">
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          {[
+            { label: 'X', key: 'x', value: tf.x },
+            { label: 'Y', key: 'y', value: tf.y },
+            { label: 'An', key: 'width', value: tf.width },
+            { label: 'Al', key: 'height', value: tf.height },
+          ].map(f => (
+            <div key={f.key}>
+              <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>{f.label}</div>
+              <input type="number" value={Math.round(f.value)}
+                onChange={e => upd({ [f.key]: parseInt(e.target.value) || 0 } as any)}
+                style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+          ))}
         </div>
-      )}
+      </Accordion>
 
-      {/* Position & size */}
-      <div className="space-y-1.5">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Posición y tamaño</p>
-        <NumField label="X" value={tf.x} min={0} max={2000} onChange={v => upd({ x: v })} />
-        <NumField label="Y" value={tf.y} min={0} max={3000} onChange={v => upd({ y: v })} />
-        <NumField label="Ancho" value={tf.width} min={40} max={2000} onChange={v => upd({ width: v })} />
-        <NumField label="Alto" value={tf.height} min={30} max={3000} onChange={v => upd({ height: v })} />
-      </div>
-
-      {/* Paragraph style */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Estilo de párrafo</p>
+      {/* Estilo de texto */}
+      <Accordion title="Estilo de texto">
+        {/* Style preset selector */}
+        {styles.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <select
+                value={tf.paragraphStyleId || ''}
+                onChange={e => {
+                  const style = styles.find(s => s.id === e.target.value)
+                  if (style && onApplyStyle) onApplyStyle(tf.id, style)
+                  else upd({ paragraphStyleId: e.target.value || undefined } as any)
+                }}
+                style={{ flex: 1, fontSize: 10, padding: '3px 5px', background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', fontFamily: 'Figtree, sans-serif' }}
+              >
+                <option value="">— Libre —</option>
+                {styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              {overridden && (
+                <button onClick={() => appliedStyle && onApplyStyle && onApplyStyle(tf.id, appliedStyle)}
+                  title="Restablecer estilo base"
+                  style={{ fontSize: 10, padding: '2px 5px', background: 'rgba(212,82,43,0.15)', border: `1px solid ${ACCENT}`, borderRadius: 4, color: ACCENT, cursor: 'pointer' }}>↩</button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Font family */}
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-[10px] text-slate-400 font-sans shrink-0">Fuente</label>
+        <div style={{ marginBottom: 6 }}>
+          <label style={{ fontSize: 9, color: MUTED, display: 'block', marginBottom: 2 }}>Fuente</label>
           <FontPicker value={tf.fontFamily} onChange={v => upd({ fontFamily: v })} />
         </div>
 
-        <NumField label="Tamaño (pt)" value={tf.fontSize} min={6} max={72} onChange={v => upd({ fontSize: v })} />
-        <NumField label="Interlineado" value={tf.lineHeight} min={1} max={3} step={0.05} onChange={v => upd({ lineHeight: v })} />
-        <NumField label="Esp. letras (px)" value={tf.letterSpacing || 0} min={-3} max={20} step={0.5} onChange={v => upd({ letterSpacing: v } as Partial<LayoutFrame>)} />
-
-        {/* Weight & style */}
-        <div className="flex items-center gap-1.5">
-          <label className="text-[10px] text-slate-400 font-sans shrink-0">Estilo</label>
-          <div className="flex gap-1 ml-auto">
-            <button
-              onClick={() => upd({ fontWeight: tf.fontWeight === 'bold' ? 'normal' : 'bold' } as Partial<LayoutFrame>)}
-              className={`w-7 h-6 rounded text-xs font-bold border transition ${tf.fontWeight === 'bold' ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-400'}`}
-              title="Negrita"
-            >B</button>
-            <button
-              onClick={() => upd({ fontStyle: tf.fontStyle === 'italic' ? 'normal' : 'italic' } as Partial<LayoutFrame>)}
-              className={`w-7 h-6 rounded text-xs italic border transition ${tf.fontStyle === 'italic' ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-400'}`}
-              title="Cursiva"
-            >I</button>
+        {/* Size + line height */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 6 }}>
+          <div>
+            <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>Tamaño</div>
+            <input type="number" min={6} max={144} value={tf.fontSize}
+              onChange={e => upd({ fontSize: Number(e.target.value) })}
+              style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>Interlineado</div>
+            <input type="number" min={1} max={4} step={0.05} value={Math.round(tf.lineHeight * 100) / 100}
+              onChange={e => upd({ lineHeight: Number(e.target.value) })}
+              style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }} />
           </div>
         </div>
 
-        {/* Alignment */}
-        <div className="flex items-center gap-1.5">
-          <label className="text-[10px] text-slate-400 font-sans shrink-0">Alineación</label>
-          <div className="flex gap-1 ml-auto">
-            {([
-              { v: 'left', icon: '≡', title: 'Izquierda' },
-              { v: 'center', icon: '≡', title: 'Centro' },
-              { v: 'right', icon: '≡', title: 'Derecha' },
-              { v: 'justify', icon: '≡', title: 'Justificado' },
-            ] as const).map(({ v, icon, title }) => (
-              <button
-                key={v}
-                onClick={() => upd({ textAlign: v } as Partial<LayoutFrame>)}
-                title={title}
-                className={`w-7 h-6 rounded text-xs border transition ${tf.textAlign === v ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-400'}`}
-              >
-                {v === 'left' ? '⬛' : v === 'center' ? '⬜' : v === 'right' ? '⬛' : '▬'}
-              </button>
-            ))}
-          </div>
+        {/* Letter spacing */}
+        <NumField label="Espaciado letras" value={tf.letterSpacing || 0} min={-5} max={20} step={0.5} onChange={v => upd({ letterSpacing: v } as any)} unit="px" />
+
+        {/* B / I buttons + align */}
+        <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+          <button onClick={() => upd({ fontWeight: tf.fontWeight === 'bold' ? 'normal' : 'bold' } as any)}
+            style={{ width: 28, height: 26, borderRadius: 5, border: `1px solid ${tf.fontWeight === 'bold' ? ACCENT : BORDER}`, background: tf.fontWeight === 'bold' ? 'rgba(212,82,43,0.15)' : ROW_BG, color: tf.fontWeight === 'bold' ? ACCENT : MUTED, cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>B</button>
+          <button onClick={() => upd({ fontStyle: tf.fontStyle === 'italic' ? 'normal' : 'italic' } as any)}
+            style={{ width: 28, height: 26, borderRadius: 5, border: `1px solid ${tf.fontStyle === 'italic' ? ACCENT : BORDER}`, background: tf.fontStyle === 'italic' ? 'rgba(212,82,43,0.15)' : ROW_BG, color: tf.fontStyle === 'italic' ? ACCENT : MUTED, cursor: 'pointer', fontStyle: 'italic', fontSize: 12 }}>I</button>
+          <div style={{ flex: 1 }} />
+          {(['left', 'center', 'right', 'justify'] as const).map(a => (
+            <button key={a} onClick={() => upd({ textAlign: a } as any)}
+              style={{ width: 28, height: 26, borderRadius: 5, border: `1px solid ${tf.textAlign === a ? ACCENT : BORDER}`, background: tf.textAlign === a ? 'rgba(212,82,43,0.15)' : ROW_BG, color: tf.textAlign === a ? ACCENT : MUTED, cursor: 'pointer', fontSize: 11 }}>
+              {a === 'left' ? '⬛' : a === 'center' ? '⬜' : a === 'right' ? '⬛' : '▬'}
+            </button>
+          ))}
         </div>
 
         {/* Text color */}
-        <ColorField
-          label="Color texto"
-          value={tf.textColor || '#1a1714'}
-          onChange={v => upd({ textColor: v } as Partial<LayoutFrame>)}
-        />
-      </div>
+        <ColorFieldDark label="Color" value={tf.textColor || '#1a1714'} onChange={v => upd({ textColor: v } as any)} />
 
-      {/* Padding */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Relleno interno</p>
-        <NumField label="Superior" value={tf.paddingTop} min={0} max={80} onChange={v => upd({ paddingTop: v })} />
-        <NumField label="Derecho" value={tf.paddingRight} min={0} max={80} onChange={v => upd({ paddingRight: v })} />
-        <NumField label="Inferior" value={tf.paddingBottom} min={0} max={80} onChange={v => upd({ paddingBottom: v })} />
-        <NumField label="Izquierdo" value={tf.paddingLeft} min={0} max={80} onChange={v => upd({ paddingLeft: v })} />
-      </div>
+        {/* Columns */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 4 }}>
+          <div>
+            <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>Columnas</div>
+            <input type="number" min={1} max={4} value={tf.columns}
+              onChange={e => upd({ columns: Number(e.target.value) })}
+              style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+          </div>
+          {tf.columns > 1 && (
+            <div>
+              <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>Medianil</div>
+              <input type="number" min={8} max={60} value={tf.columnGutter}
+                onChange={e => upd({ columnGutter: Number(e.target.value) })}
+                style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+            </div>
+          )}
+        </div>
+      </Accordion>
 
-      {/* Columns */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Columnas</p>
-        <NumField label="Columnas" value={tf.columns} min={1} max={4} onChange={v => upd({ columns: v })} />
-        {tf.columns > 1 && <NumField label="Medianil (px)" value={tf.columnGutter} min={8} max={60} onChange={v => upd({ columnGutter: v })} />}
-      </div>
+      {/* Relleno interno */}
+      <Accordion title="Relleno interno" defaultOpen={false}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          {[
+            { label: 'Sup', key: 'paddingTop', value: tf.paddingTop ?? 4 },
+            { label: 'Der', key: 'paddingRight', value: tf.paddingRight ?? 6 },
+            { label: 'Inf', key: 'paddingBottom', value: tf.paddingBottom ?? 4 },
+            { label: 'Izq', key: 'paddingLeft', value: tf.paddingLeft ?? 6 },
+          ].map(f => (
+            <div key={f.key}>
+              <div style={{ fontSize: 9, color: MUTED, marginBottom: 2 }}>{f.label}</div>
+              <input type="number" min={0} max={80} value={f.value}
+                onChange={e => upd({ [f.key]: Number(e.target.value) } as any)}
+                style={{ width: '100%', padding: '3px 5px', fontSize: 11, background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', textAlign: 'right', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+            </div>
+          ))}
+        </div>
+      </Accordion>
 
-      {/* Threading */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Encadenado de texto</p>
+      {/* Encadenado de texto */}
+      <Accordion title="Encadenado de texto" defaultOpen={false}>
         {tf.threadNextId ? (
-          <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-[10px] font-sans text-indigo-700">
-            <p>→ Vinculado al marco siguiente</p>
-            <button onClick={() => onUnlink(tf.id)} className="mt-1 text-red-500 hover:text-red-700 transition">Desvincular</button>
+          <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, padding: '6px 8px', fontSize: 10 }}>
+            <p style={{ color: '#a5b4fc', marginBottom: 4 }}>→ Vinculado al marco siguiente</p>
+            <button onClick={() => onUnlink(tf.id)}
+              style={{ fontSize: 10, color: '#f87171', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Desvincular</button>
           </div>
         ) : (
-          <p className="text-[10px] text-slate-400 font-sans">Sin enlace. Usa el botón <strong>⛓ Vincular</strong> para encadenar.</p>
+          <p style={{ fontSize: 10, color: MUTED }}>Sin enlace. Usa <strong style={{ color: TEXT }}>⛓ Vincular</strong> para encadenar marcos.</p>
         )}
         {tf.threadPrevId && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-[10px] font-sans text-indigo-700">
+          <div style={{ marginTop: 6, background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, padding: '6px 8px', fontSize: 10, color: '#a5b4fc' }}>
             ← Recibe texto del marco anterior
           </div>
         )}
-      </div>
+      </Accordion>
 
-      {/* Appearance */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Apariencia</p>
-        <ColorField label="Fondo" value={tf.backgroundColor || 'transparent'} onChange={v => upd({ backgroundColor: v } as Partial<LayoutFrame>)} />
-        <ColorField label="Borde color" value={tf.borderColor || 'transparent'} onChange={v => upd({ borderColor: v } as Partial<LayoutFrame>)} />
-        <NumField label="Borde grosor" value={tf.borderWidth || 0} min={0} max={20} onChange={v => upd({ borderWidth: v } as Partial<LayoutFrame>)} />
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-[10px] text-slate-400 font-sans">Borde estilo</label>
-          <select value={tf.borderStyle || 'solid'} onChange={e => upd({ borderStyle: e.target.value as LayoutFrame['borderStyle'] })}
-            className="text-xs border border-slate-200 rounded px-1.5 py-0.5 outline-none font-sans">
+      {/* Apariencia */}
+      <Accordion title="Apariencia" defaultOpen={false}>
+        <ColorFieldDark label="Fondo" value={tf.backgroundColor || 'transparent'} onChange={v => upd({ backgroundColor: v } as any)} />
+        <ColorFieldDark label="Borde" value={tf.borderColor || 'transparent'} onChange={v => upd({ borderColor: v } as any)} />
+        <NumField label="Grosor borde" value={tf.borderWidth || 0} min={0} max={20} onChange={v => upd({ borderWidth: v } as any)} unit="px" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <label style={{ fontSize: 10, color: LABEL, flexShrink: 0 }}>Estilo borde</label>
+          <select value={tf.borderStyle || 'solid'} onChange={e => upd({ borderStyle: e.target.value as any })}
+            style={{ flex: 1, fontSize: 10, padding: '3px 5px', background: ROW_BG, border: `1px solid ${BORDER}`, borderRadius: 5, color: TEXT, outline: 'none', fontFamily: 'Figtree, sans-serif' }}>
             <option value="solid">Sólido</option>
             <option value="dashed">Rayado</option>
             <option value="dotted">Punteado</option>
           </select>
         </div>
-        <NumField label="Radio esquinas" value={tf.cornerRadius || 0} min={0} max={100} onChange={v => upd({ cornerRadius: v } as Partial<LayoutFrame>)} />
-        <NumField label="Opacidad (0-1)" value={tf.opacity !== undefined ? tf.opacity : 1} min={0} max={1} step={0.05} onChange={v => upd({ opacity: v } as Partial<LayoutFrame>)} />
-      </div>
+        <NumField label="Radio esquina" value={tf.cornerRadius || 0} min={0} max={100} onChange={v => upd({ cornerRadius: v } as any)} unit="px" />
+      </Accordion>
 
-      {/* Layer */}
-      <div className="space-y-1.5 border-t border-slate-100 pt-3">
-        <p className="text-[10px] font-sans text-slate-400 uppercase tracking-wider">Capa</p>
-        <NumField label="Z-order" value={tf.zIndex || 10} min={1} max={100} onChange={v => upd({ zIndex: v } as Partial<LayoutFrame>)} />
-        <div className="flex items-center justify-between">
-          <label className="text-[10px] text-slate-400 font-sans">Bloqueado</label>
-          <button
-            onClick={() => upd({ locked: !tf.locked } as Partial<LayoutFrame>)}
-            className={`px-2 py-0.5 rounded text-[10px] border transition ${tf.locked ? 'border-yellow-400 bg-yellow-50 text-yellow-700' : 'border-slate-200 text-slate-400'}`}
-          >{tf.locked ? '🔒 Sí' : '🔓 No'}</button>
+      {/* Capa */}
+      <Accordion title="Capa" defaultOpen={false}>
+        <NumField label="Opacidad" value={(tf.opacity ?? 1) * 100} min={0} max={100} onChange={v => upd({ opacity: v / 100 } as any)} unit="%" />
+        <NumField label="Z-order" value={tf.zIndex || 10} min={1} max={100} onChange={v => upd({ zIndex: v } as any)} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+          <label style={{ fontSize: 10, color: LABEL }}>Bloqueado</label>
+          <button onClick={() => upd({ locked: !tf.locked } as any)}
+            style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, border: `1px solid ${tf.locked ? '#d97706' : BORDER}`, background: tf.locked ? 'rgba(217,119,6,0.15)' : ROW_BG, color: tf.locked ? '#fbbf24' : MUTED, cursor: 'pointer' }}>
+            {tf.locked ? '🔒 Sí' : '🔓 No'}
+          </button>
         </div>
-      </div>
+      </Accordion>
+
     </div>
   )
 }

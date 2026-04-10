@@ -9,6 +9,31 @@ All notable changes to Scriptorium are documented here.
 
 ## [Unreleased] — v1.1 in progress
 
+### Added — BLOQUE 14: Dark / Light Theme
+- CSS custom-property theme system (`--app-bg`, `--app-surface`, `--app-border`, `--app-text`, etc.)
+- `data-theme="light"` attribute toggles the entire app chrome between dark (default) and light
+- ☀ / ◗ toggle button in TitleBar; preference persisted via `getSettings/setSettings`
+- TitleBar and DocTabsBar fully use CSS variables — instant theme switch with no flash
+- Layout canvas chrome intentionally stays dark (InDesign/Affinity professional aesthetic)
+
+### Added — BLOQUE 12: DOCX Export
+- New **📝 DOCX** format in the Export modal (layout mode)
+- Exports all text frames to a `.docx` file ordered by page then vertical position
+- Per-frame typography preserved: bold, italic, font size, text alignment
+- Page breaks inserted between layout pages
+- Non-text frames (images, shapes, charts) noted as `[IMAGEN]` / `[FORMA]` / `[GRÁFICO]` placeholders
+- Uses `docx` npm package; rendering in Electron main process via `export:docx` IPC handler
+
+### Added — UX: Document Tabs + Tool Sidebar
+- Document management moved from left sidebar to **browser-style horizontal tab bar** below TitleBar
+- **Affinity-style vertical tool palette** (44 px) on the left of the layout canvas
+  - SVG icons: Pointer, Text, Image, Rect, Ellipse, Line, Chart
+  - Future tools shown dimmed: Table, Eyedropper, Hand, Zoom
+  - Active tool highlighted with accent color; click again to return to pointer
+- PageStrip now shows **spread groups** (Página 1 alone, Páginas 2,3 side-by-side, etc.)
+- **Resizable sidebars**: drag the 4 px handle between PageStrip ↔ canvas ↔ StudioSidebar
+- Capas tab auto-syncs to the page of the selected frame
+
 ### Added — BLOQUE 10: Data Charts (ECharts)
 - New **LayoutChartFrame** type: embed interactive charts in layout pages
 - Chart types: bar, line, area, pie, scatter

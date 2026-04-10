@@ -102,10 +102,12 @@
     "@tiptap/pm": "^2.10.4",
     "@tiptap/react": "^2.10.4",
     "@tiptap/starter-kit": "^2.10.4",
+    "docx": "^9.6.1",
     "echarts": "^6.0.0",
     "electron-store": "^8.2.0",
     "font-list": "^2.0.2",
     "katex": "^0.16.45",
+    "mammoth": "^1.12.0",
     "pdfjs-dist": "^3.11.174",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

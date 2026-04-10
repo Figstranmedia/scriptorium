@@ -1,6 +1,6 @@
 /**
- * PageStrip — left sidebar with page thumbnails (Block 7).
- * Click to scroll to page, right-click for insert/delete page.
+ * PageStrip — left sidebar with page thumbnails in Affinity Publisher spread layout.
+ * Page 1 alone, then pages 2+3, 4+5, … shown as side-by-side spreads.
  */
 import React, { useRef, useState } from 'react'
 import type { AnyLayoutFrame } from '../../lib/threadEngine'
@@ -13,19 +13,44 @@ interface Props {
   frames: AnyLayoutFrame[]
   activePageIndex: number
   spreadPages: number[]
+  width?: number
   onScrollToPage: (pageIndex: number) => void
   onAddPage: (afterIndex: number) => void
   onDeletePage: (pageIndex: number) => void
   onToggleSpread: (pageIndex: number) => void
 }
 
-export function PageStrip({ pageCount, pageSize, frames, activePageIndex, spreadPages, onScrollToPage, onAddPage, onDeletePage, onToggleSpread }: Props) {
+// Build display groups: [[0], [1,2], [3,4], …]
+function buildGroups(pageCount: number): number[][] {
+  const groups: number[][] = []
+  if (pageCount === 0) return groups
+  groups.push([0]) // first page alone
+  let i = 1
+  while (i < pageCount) {
+    if (i + 1 < pageCount) {
+      groups.push([i, i + 1])
+      i += 2
+    } else {
+      groups.push([i])
+      i++
+    }
+  }
+  return groups
+}
+
+export function PageStrip({
+  pageCount, pageSize, frames, activePageIndex, spreadPages, width = 96,
+  onScrollToPage, onAddPage, onDeletePage, onToggleSpread,
+}: Props) {
   const [contextPage, setContextPage] = useState<number | null>(null)
   const [contextPos, setContextPos] = useState({ x: 0, y: 0 })
 
   const aspect = pageSize.heightMM / pageSize.widthMM
-  const thumbW = 72
-  const thumbH = Math.round(thumbW * aspect)
+
+  // Calculate thumb width to fit within the panel
+  // For a spread pair the two thumbs must fit side-by-side with gap + padding
+  const padding = 8
+  const availableW = Math.max(60, width - padding * 2)
 
   const handleContextMenu = (e: React.MouseEvent, pageIndex: number) => {
     e.preventDefault()
@@ -33,9 +58,11 @@ export function PageStrip({ pageCount, pageSize, frames, activePageIndex, spread
     setContextPos({ x: e.clientX, y: e.clientY })
   }
 
+  const groups = buildGroups(pageCount)
+
   return (
     <div style={{
-      width: 88,
+      width,
       background: '#1a202c',
       borderRight: '1px solid #2d3748',
       display: 'flex',
@@ -44,61 +71,90 @@ export function PageStrip({ pageCount, pageSize, frames, activePageIndex, spread
       overflowX: 'hidden',
       userSelect: 'none',
       flexShrink: 0,
+      transition: 'width 0.05s',
     }}>
-      {Array.from({ length: pageCount }, (_, i) => {
-        const pageFrames = frames.filter(f => f.pageIndex === i)
-        const isActive = i === activePageIndex
+      {groups.map(group => {
+        const isSingle = group.length === 1
+        // Thumbnail dimensions
+        const thumbW = isSingle
+          ? Math.min(availableW, 72)
+          : Math.floor((availableW - 4) / 2) // pair with 4px gap
+
+        const thumbH = Math.round(thumbW * aspect)
+        const isActive = group.some(i => i === activePageIndex)
+        const label = group.map(i => i + 1).join(', ')
+
         return (
           <div
-            key={i}
-            onClick={() => onScrollToPage(i)}
-            onContextMenu={(e) => handleContextMenu(e, i)}
+            key={group[0]}
             style={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              padding: '8px 4px 4px',
+              padding: `8px ${padding}px 4px`,
               cursor: 'pointer',
-              background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
+              background: isActive ? 'rgba(99,102,241,0.12)' : 'transparent',
               borderLeft: isActive ? '2px solid #6366f1' : '2px solid transparent',
               transition: 'background 0.15s',
             }}
           >
-            {/* Thumbnail */}
+            {/* Spread label */}
             <div style={{
-              width: thumbW,
-              height: thumbH,
-              background: '#fff',
-              border: `1px solid ${isActive ? '#6366f1' : '#2d3748'}`,
-              borderRadius: 2,
-              overflow: 'hidden',
-              position: 'relative',
-              flexShrink: 0,
+              alignSelf: 'flex-start',
+              fontSize: 9,
+              color: isActive ? '#a5b4fc' : '#4a5568',
+              fontFamily: 'system-ui, sans-serif',
+              marginBottom: 4,
+              letterSpacing: '0.03em',
+              paddingLeft: 2,
             }}>
-              {/* Mini frame representations */}
-              {pageFrames.map(f => {
-                const scaleX = thumbW / ((pageSize.widthMM / 25.4) * 96)
-                const scaleY = thumbH / ((pageSize.heightMM / 25.4) * 96)
+              {isSingle ? `Página ${label}` : `Páginas ${label}`}
+            </div>
+
+            {/* Thumbnail(s) */}
+            <div style={{ display: 'flex', gap: isSingle ? 0 : 4 }}>
+              {group.map(pageIdx => {
+                const pageFrames = frames.filter(f => f.pageIndex === pageIdx)
+                const isThisActive = pageIdx === activePageIndex
+
                 return (
-                  <div key={f.id} style={{
-                    position: 'absolute',
-                    left: f.x * scaleX,
-                    top: f.y * scaleY,
-                    width: f.width * scaleX,
-                    height: f.height * scaleY,
-                    background: isImageFrame(f) ? 'rgba(168,85,247,0.2)' : 'rgba(99,102,241,0.15)',
-                    border: `0.5px solid ${isImageFrame(f) ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.3)'}`,
-                    boxSizing: 'border-box',
-                  }} />
+                  <div
+                    key={pageIdx}
+                    onClick={() => onScrollToPage(pageIdx)}
+                    onContextMenu={(e) => handleContextMenu(e, pageIdx)}
+                    title={`Página ${pageIdx + 1}`}
+                    style={{
+                      width: thumbW,
+                      height: thumbH,
+                      background: '#fff',
+                      border: `1.5px solid ${isThisActive ? '#6366f1' : isActive ? 'rgba(99,102,241,0.4)' : '#2d3748'}`,
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      position: 'relative',
+                      flexShrink: 0,
+                      boxShadow: isThisActive ? '0 0 0 1px rgba(99,102,241,0.5)' : 'none',
+                    }}
+                  >
+                    {/* Mini frame representations */}
+                    {pageFrames.map(f => {
+                      const scaleX = thumbW / ((pageSize.widthMM / 25.4) * 96)
+                      const scaleY = thumbH / ((pageSize.heightMM / 25.4) * 96)
+                      return (
+                        <div key={f.id} style={{
+                          position: 'absolute',
+                          left: f.x * scaleX,
+                          top: f.y * scaleY,
+                          width: f.width * scaleX,
+                          height: f.height * scaleY,
+                          background: isImageFrame(f) ? 'rgba(168,85,247,0.2)' : 'rgba(99,102,241,0.15)',
+                          border: `0.5px solid ${isImageFrame(f) ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.3)'}`,
+                          boxSizing: 'border-box',
+                        }} />
+                      )
+                    })}
+                  </div>
                 )
               })}
-            </div>
-            {/* Page number + spread badge */}
-            <div style={{ marginTop: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
-              <span style={{ fontSize: 9, fontFamily: 'sans-serif', color: isActive ? '#a5b4fc' : '#64748b' }}>{i + 1}</span>
-              {spreadPages.includes(i) && (
-                <span style={{ fontSize: 7, color: '#818cf8', fontFamily: 'sans-serif', background: 'rgba(99,102,241,0.15)', borderRadius: 2, padding: '0 2px' }}>⊞</span>
-              )}
             </div>
           </div>
         )
@@ -116,6 +172,7 @@ export function PageStrip({ pageCount, pageSize, frames, activePageIndex, spread
           color: '#64748b',
           fontSize: 18,
           transition: 'color 0.15s',
+          flexShrink: 0,
         }}
         title="Agregar página"
         onMouseEnter={e => (e.currentTarget.style.color = '#a5b4fc')}

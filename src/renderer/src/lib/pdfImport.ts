@@ -154,6 +154,41 @@ function clusterIntoBlocks(items: MappedItem[], pageIndex: number): PDFTextBlock
   return blocks
 }
 
+/**
+ * Renders each page of a PDF to a canvas and returns base64 data URLs.
+ * Use this to import a PDF as image frames instead of text frames.
+ */
+export async function renderPDFToImages(
+  base64Data: string,
+  scale = 1.5,
+): Promise<Array<{ pageIndex: number; dataUrl: string; widthPx: number; heightPx: number }>> {
+  const binary = atob(base64Data)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise
+  const results: Array<{ pageIndex: number; dataUrl: string; widthPx: number; heightPx: number }> = []
+
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const vp = page.getViewport({ scale })
+
+    const canvas = window.document.createElement('canvas')
+    canvas.width  = Math.round(vp.width)
+    canvas.height = Math.round(vp.height)
+    const ctx = canvas.getContext('2d')!
+
+    await page.render({ canvasContext: ctx, viewport: vp }).promise
+    results.push({
+      pageIndex: p - 1,
+      dataUrl: canvas.toDataURL('image/jpeg', 0.92),
+      widthPx: canvas.width,
+      heightPx: canvas.height,
+    })
+  }
+  return results
+}
+
 /** Detect nearest standard page size name from PDF points. */
 function detectPageSizeName(w: number, h: number): string {
   const sizes: Array<[string, number, number]> = [

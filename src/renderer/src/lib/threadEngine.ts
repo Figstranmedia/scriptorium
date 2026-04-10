@@ -108,7 +108,40 @@ export interface LayoutChartFrame {
   svgCache?: string   // pre-rendered SVG for PDF/SVG export
 }
 
-export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame | LayoutShapeFrame | LayoutChartFrame
+export interface LayoutTableCell {
+  text: string
+  bold?: boolean
+  italic?: boolean
+  bg?: string
+  align?: 'left' | 'center' | 'right'
+  textColor?: string
+}
+
+export interface LayoutTableFrame {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  pageIndex: number
+  rows: number
+  cols: number
+  cells: LayoutTableCell[][]   // [row][col]
+  headerRow: boolean
+  borderColor: string
+  borderWidth: number
+  cellPadding: number
+  fontSize: number
+  fontFamily: string
+  textColor: string
+  headerBg: string
+  evenRowBg: string
+  zIndex: number
+  locked: boolean
+  opacity: number
+}
+
+export type AnyLayoutFrame = LayoutFrame | LayoutImageFrame | LayoutShapeFrame | LayoutChartFrame | LayoutTableFrame
 
 export interface ThreadResult {
   frameId: string
@@ -406,4 +439,49 @@ export function isShapeFrame(f: AnyLayoutFrame): f is LayoutShapeFrame {
 
 export function isChartFrame(f: AnyLayoutFrame): f is LayoutChartFrame {
   return 'chartType' in f
+}
+
+export function isTableFrame(f: AnyLayoutFrame): f is LayoutTableFrame {
+  return 'rows' in f && 'cols' in f && 'cells' in f
+}
+
+let _tableCounter = 0
+export function createDefaultTableFrame(
+  pageIndex: number,
+  x: number,
+  y: number,
+  partial?: Partial<LayoutTableFrame>,
+): LayoutTableFrame {
+  _tableCounter++
+  const rows = 3
+  const cols = 3
+  const cells: LayoutTableCell[][] = Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => ({
+      text: r === 0 ? `Columna ${c + 1}` : '',
+      bold: r === 0,
+    }))
+  )
+  return {
+    id: `ltf_${Date.now()}_${_tableCounter}`,
+    x, y,
+    width: 400,
+    height: 160,
+    pageIndex,
+    rows,
+    cols,
+    cells,
+    headerRow: true,
+    borderColor: '#94a3b8',
+    borderWidth: 1,
+    cellPadding: 8,
+    fontSize: 11,
+    fontFamily: 'sans',
+    textColor: '#1e293b',
+    headerBg: '#e2e8f0',
+    evenRowBg: '#f8fafc',
+    zIndex: 10,
+    locked: false,
+    opacity: 1,
+    ...partial,
+  }
 }

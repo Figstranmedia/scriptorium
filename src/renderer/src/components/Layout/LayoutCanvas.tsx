@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } from '../../lib/threadEngine'
 import {
   createDefaultFrame, createDefaultImageFrame, createDefaultShapeFrame, createDefaultChartFrame,
+  createDefaultTableFrame,
   distributeContent, isImageFrame, isShapeFrame
 } from '../../lib/threadEngine'
 import { LayoutPage, PAGE_SIZES, mmToPx, type PageSize, type DrawMode } from './LayoutPage'
@@ -11,12 +12,14 @@ import { PageStrip } from './PageStrip'
 import { ContextMenu } from './ContextMenu'
 import { AIDesignPanel } from './AIDesignPanel'
 import { runPreflight } from '../../lib/preflight'
-import { parsePDF } from '../../lib/pdfImport'
+import { parsePDF, renderPDFToImages } from '../../lib/pdfImport'
+import { parseDocxHTML } from '../../lib/docxImport'
 import { snapPosition } from '../../lib/snap'
 import type { Document, Guide, ParagraphStyle } from '../../store/useStore'
 import { DEFAULT_PARAGRAPH_STYLES } from '../../store/useStore'
 import { CoverCanvas } from './CoverCanvas'
 import { StudioSidebar } from './StudioSidebar'
+import { ToolSidebar } from './ToolSidebar'
 
 interface Props {
   document: Document
@@ -58,7 +61,11 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showAIDesign, setShowAIDesign] = useState(false)
   const [spreadPages, setSpreadPages] = useState<number[]>((document as any).layoutSpreadPages || [])
+  const [leftPanelWidth, setLeftPanelWidth] = useState(96)
+  const [rightPanelWidth, setRightPanelWidth] = useState(224)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const leftDragRef = useRef<{ startX: number; startW: number } | null>(null)
+  const rightDragRef = useRef<{ startX: number; startW: number } | null>(null)
 
   // Undo/Redo history
   const history = useRef<AnyLayoutFrame[][]>([JSON.parse(JSON.stringify(document.layoutFrames || []))])
@@ -239,6 +246,56 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     setDrawMode('pointer')
   }, [saveLayout, pushHistory])
 
+  const handleAddTableFrame = useCallback((
+    pageIndex: number, x: number, y: number, w?: number, h?: number
+  ) => {
+    const frame = createDefaultTableFrame(pageIndex, x, y, {
+      width: w ?? 320,
+      height: h ?? 160,
+    })
+    setFrames(prev => {
+      const next = [...prev, frame]
+      pushHistory(next, 'Añadir tabla')
+      saveLayout(next)
+      return next
+    })
+    setSelectedFrameIds([frame.id])
+    setDrawMode('pointer')
+  }, [saveLayout, pushHistory])
+
+  // ── Resizable panel drag handlers ────────────────────────────────────────────
+  const handleLeftDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    leftDragRef.current = { startX: e.clientX, startW: leftPanelWidth }
+    const onMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - leftDragRef.current!.startX
+      setLeftPanelWidth(Math.max(60, Math.min(200, leftDragRef.current!.startW + delta)))
+    }
+    const onUp = () => {
+      leftDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [leftPanelWidth])
+
+  const handleRightDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    rightDragRef.current = { startX: e.clientX, startW: rightPanelWidth }
+    const onMove = (ev: MouseEvent) => {
+      const delta = rightDragRef.current!.startX - ev.clientX
+      setRightPanelWidth(Math.max(160, Math.min(420, rightDragRef.current!.startW + delta)))
+    }
+    const onUp = () => {
+      rightDragRef.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [rightPanelWidth])
+
   // ── Selection ────────────────────────────────────────────────────────────────
   const handleSelectFrame = useCallback((id: string | null, addToSelection?: boolean) => {
     if (id === null) { setSelectedFrameIds([]); return }
@@ -247,7 +304,10 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     } else {
       setSelectedFrameIds([id])
     }
-  }, [])
+    // Auto-sync active page to the selected frame's page
+    const frame = frames.find(f => f.id === id)
+    if (frame) setActivePageIndex(frame.pageIndex)
+  }, [frames])
 
   const handleSelectFramesByRect = useCallback((ids: string[]) => {
     setSelectedFrameIds(ids)
@@ -580,11 +640,113 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     await applyPDFImport(result.data, result.name)
   }, [applyPDFImport])
 
-  // Expose for drag-and-drop from DocSidebar
+  // Expose for drag-and-drop from DocSidebar and global menu
   useEffect(() => {
     (window as any).__triggerPDFImportWithData = applyPDFImport
     return () => { delete (window as any).__triggerPDFImportWithData }
   }, [applyPDFImport])
+
+  useEffect(() => {
+    (window as any).__triggerPDFImport = handleImportPDF
+    return () => { delete (window as any).__triggerPDFImport }
+  }, [handleImportPDF])
+
+  useEffect(() => {
+    (window as any).__triggerPDFImportAsImages = handleImportPDFAsImages
+    return () => { delete (window as any).__triggerPDFImportAsImages }
+  }, [handleImportPDFAsImages])
+
+  useEffect(() => {
+    (window as any).__triggerDOCXImport = handleImportDOCX
+    return () => { delete (window as any).__triggerDOCXImport }
+  }, [handleImportDOCX])
+
+  // ── DOCX Import ───────────────────────────────────────────────────────────────
+  const handleImportDOCX = useCallback(async () => {
+    const result = await window.api.importDOCX()
+    if (!result) return
+    if (result.error) { alert('Error al importar DOCX: ' + result.error); return }
+    setImporting(true)
+    try {
+      const blocks = parseDocxHTML(result.html)
+      const ps = PAGE_SIZES[pageSizeKey] || PAGE_SIZES.A4
+      const pageW = mmToPx(ps.widthMM)
+      const marginPx = 57
+      const frameW = pageW - marginPx * 2
+      let currentPage = pageCount - 1
+      let currentY = marginPx
+      const maxH = mmToPx(ps.heightMM) - marginPx * 2
+      const newFrames: AnyLayoutFrame[] = []
+      for (const block of blocks) {
+        const h = block.isHeading ? (block.fontSize * 2.5 + 16) : Math.min(maxH, block.html.length * 0.6 + 60)
+        if (currentY + h > mmToPx(ps.heightMM) - marginPx) {
+          currentPage++
+          currentY = marginPx
+        }
+        const frame = createDefaultFrame(currentPage, marginPx, currentY, {
+          width: frameW,
+          height: Math.min(h, maxH),
+          fontSize: block.fontSize,
+          fontWeight: block.fontWeight,
+          fontStyle: block.fontStyle,
+          textAlign: block.textAlign,
+          ownContent: block.html,
+          paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 8,
+        })
+        newFrames.push(frame)
+        currentY += frame.height + 8
+      }
+      const newPageCount = Math.max(pageCount, currentPage + 1)
+      setFrames(prev => {
+        const next = [...prev, ...newFrames]
+        pushHistory(next, 'Importar DOCX')
+        saveLayout(next, newPageCount)
+        return next
+      })
+      setPageCount(newPageCount)
+      alert(`DOCX importado: ${result.name}\n${newFrames.length} bloques en ${currentPage + 1} páginas.`)
+    } finally {
+      setImporting(false)
+    }
+  }, [pageCount, pageSizeKey, saveLayout, pushHistory])
+
+  // ── PDF → Images Import ───────────────────────────────────────────────────────
+  const handleImportPDFAsImages = useCallback(async () => {
+    const result = await window.api.importPDF()
+    if (!result) return
+    setImporting(true)
+    try {
+      const pages = await renderPDFToImages(result.data, 1.5)
+      const ps = PAGE_SIZES[pageSizeKey] || PAGE_SIZES.A4
+      const targetW = mmToPx(ps.widthMM)
+      let needed = pageCount
+      const newFrames: AnyLayoutFrame[] = pages.map(pg => {
+        const ratio = pg.heightPx / pg.widthPx
+        const w = targetW
+        const h = w * ratio
+        if (pg.pageIndex + 1 > needed) needed = pg.pageIndex + 1
+        const frame = createDefaultImageFrame(pg.pageIndex, 0, 0)
+        frame.width = w
+        frame.height = h
+        frame.src = pg.dataUrl
+        frame.fit = 'fill'
+        return frame
+      })
+      const newPageCount = Math.max(pageCount, needed)
+      setFrames(prev => {
+        const next = [...prev, ...newFrames]
+        pushHistory(next, 'Importar PDF como imágenes')
+        saveLayout(next, newPageCount)
+        return next
+      })
+      setPageCount(newPageCount)
+      alert(`PDF importado como imágenes: ${result.name}\n${pages.length} páginas.`)
+    } catch (err) {
+      alert('Error: ' + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setImporting(false)
+    }
+  }, [pageCount, pageSizeKey, saveLayout, pushHistory])
 
   // ── Context menu ─────────────────────────────────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent, frameId: string | null) => {
@@ -663,6 +825,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       if (e.key === 'e' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-ellipse' ? 'pointer' : 'draw-ellipse'); return }
       if (e.key === 'l' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-line' ? 'pointer' : 'draw-line'); return }
       if (e.key === 'c' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-chart' ? 'pointer' : 'draw-chart'); return }
+      if (e.key === 'b' && !e.metaKey && !e.ctrlKey) { setDrawMode(m => m === 'draw-table' ? 'pointer' : 'draw-table'); return }
       if (e.key === 's' && !e.metaKey && !e.ctrlKey) { setSnapEnabled(v => !v); return }
 
       // Zoom
@@ -707,6 +870,9 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   return (
     <div className="flex flex-1 overflow-hidden" style={{ position: 'relative', background: '#3a3a3e' }}>
 
+      {/* Tool sidebar (leftmost) */}
+      <ToolSidebar drawMode={drawMode} onSetDrawMode={setDrawMode} />
+
       {/* Page strip (left) */}
       <PageStrip
         pageCount={pageCount}
@@ -714,6 +880,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         frames={frames}
         activePageIndex={activePageIndex}
         spreadPages={spreadPages}
+        width={leftPanelWidth}
         onScrollToPage={scrollToPage}
         onAddPage={handleAddPage}
         onDeletePage={handleDeletePage}
@@ -722,46 +889,24 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         )}
       />
 
+      {/* Left resize handle */}
+      <div
+        onMouseDown={handleLeftDragStart}
+        style={{
+          width: 4, cursor: 'col-resize', flexShrink: 0,
+          background: 'transparent', transition: 'background 0.15s',
+          zIndex: 20,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(212,82,43,0.4)')}
+        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+      />
+
       {/* Main canvas area */}
       <div className="flex flex-col flex-1 overflow-hidden">
 
         {/* Toolbar */}
         <div className="flex items-center gap-1.5 px-2.5 py-1 border-b text-xs font-sans flex-wrap shrink-0"
           style={{ background: '#222226', borderColor: 'rgba(255,255,255,0.06)', zIndex: 30 }}>
-
-          {/* Draw mode tools */}
-          <div className="flex items-center gap-px rounded p-0.5" style={{ background: 'rgba(255,255,255,0.06)' }}>
-            <button onClick={() => setDrawMode('pointer')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'pointer' ? 'rgba(255,255,255,0.15)' : 'transparent', color: drawMode === 'pointer' ? '#e4e4e6' : '#a0a0a8' }}
-              title="Selección (Esc)">↖</button>
-            <button onClick={() => setDrawMode('draw-text')}
-              className="px-2 py-1 rounded text-xs transition font-bold"
-              style={{ background: drawMode === 'draw-text' ? '#2997ff' : 'transparent', color: drawMode === 'draw-text' ? '#fff' : '#a0a0a8' }}
-              title="Marco de texto (T)">T</button>
-            <button onClick={() => setDrawMode('draw-image')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'draw-image' ? '#7c3aed' : 'transparent', color: drawMode === 'draw-image' ? '#fff' : '#a0a0a8' }}
-              title="Marco de imagen (I)">🖼</button>
-            <button onClick={() => setDrawMode(m => m === 'draw-rect' ? 'pointer' : 'draw-rect')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'draw-rect' ? '#059669' : 'transparent', color: drawMode === 'draw-rect' ? '#fff' : '#a0a0a8' }}
-              title="Rectángulo (R)">▭</button>
-            <button onClick={() => setDrawMode(m => m === 'draw-ellipse' ? 'pointer' : 'draw-ellipse')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'draw-ellipse' ? '#059669' : 'transparent', color: drawMode === 'draw-ellipse' ? '#fff' : '#a0a0a8' }}
-              title="Elipse (E)">◯</button>
-            <button onClick={() => setDrawMode(m => m === 'draw-line' ? 'pointer' : 'draw-line')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'draw-line' ? '#059669' : 'transparent', color: drawMode === 'draw-line' ? '#fff' : '#a0a0a8' }}
-              title="Línea (L)">╱</button>
-            <button onClick={() => setDrawMode(m => m === 'draw-chart' ? 'pointer' : 'draw-chart')}
-              className="px-2 py-1 rounded text-xs transition"
-              style={{ background: drawMode === 'draw-chart' ? '#d97706' : 'transparent', color: drawMode === 'draw-chart' ? '#fff' : '#a0a0a8' }}
-              title="Gráfico (C)">📊</button>
-          </div>
-
-          <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
           {/* Undo/Redo */}
           <button onClick={undo} className="px-2 py-1 rounded text-xs transition"
@@ -790,12 +935,24 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
 
           <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
-          {/* PDF Import */}
+          {/* Import buttons */}
           <button onClick={handleImportPDF} disabled={importing}
             className="px-2 py-1 rounded text-xs transition disabled:opacity-40"
             style={{ background: 'rgba(34,197,94,0.15)', color: '#4ade80', border: '1px solid rgba(74,222,128,0.2)' }}
-            title="Importar PDF y detectar estructura">
-            {importing ? '⏳ Importando…' : '⬆ PDF'}
+            title="Importar PDF (texto)">
+            {importing ? '⏳…' : '⬆ PDF'}
+          </button>
+          <button onClick={handleImportPDFAsImages} disabled={importing}
+            className="px-2 py-1 rounded text-xs transition disabled:opacity-40"
+            style={{ background: 'rgba(168,85,247,0.15)', color: '#c084fc', border: '1px solid rgba(192,132,252,0.2)' }}
+            title="Importar PDF como imágenes por página">
+            ⬆ PDF img
+          </button>
+          <button onClick={handleImportDOCX} disabled={importing}
+            className="px-2 py-1 rounded text-xs transition disabled:opacity-40"
+            style={{ background: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.2)' }}
+            title="Importar Word (.docx)">
+            ⬆ DOCX
           </button>
 
           {/* AI Design */}
@@ -816,11 +973,12 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           {drawMode !== 'pointer' && !linkingFrom && (
             <div className="px-3 py-1 rounded text-white text-xs animate-pulse"
               style={{ background: drawMode === 'draw-text' ? '#2997ff' : drawMode === 'draw-image' ? '#7c3aed' : '#059669' }}>
-              {drawMode === 'draw-text' ? 'Arrastra para crear marco de texto'
-                : drawMode === 'draw-image' ? 'Arrastra para crear marco de imagen'
+              {drawMode === 'draw-text' ? 'Arrastra para crear marco de texto (T)'
+                : drawMode === 'draw-image' ? 'Arrastra para crear marco de imagen (I)'
                 : drawMode === 'draw-rect' ? 'Arrastra para dibujar un rectángulo (R)'
                 : drawMode === 'draw-ellipse' ? 'Arrastra para dibujar una elipse (E)'
                 : drawMode === 'draw-chart' ? 'Arrastra para insertar un gráfico (C)'
+                : drawMode === 'draw-table' ? 'Arrastra para insertar una tabla (B)'
                 : 'Arrastra para dibujar una línea (L)'}
               <button onClick={() => setDrawMode('pointer')} className="ml-2 underline">Cancelar</button>
             </div>
@@ -913,6 +1071,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                 onAddImageFrame={handleAddImageFrame}
                 onAddShapeFrame={handleAddShapeFrame}
                 onAddChartFrame={handleAddChartFrame}
+                onAddTableFrame={handleAddTableFrame}
                 onStartLink={handleStartLink}
                 onCompleteLink={handleCompleteLink}
                 onDoubleClickGuide={handleDeleteGuide}
@@ -925,8 +1084,21 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         </div>
       </div>
 
+      {/* Right resize handle */}
+      <div
+        onMouseDown={handleRightDragStart}
+        style={{
+          width: 4, cursor: 'col-resize', flexShrink: 0,
+          background: 'transparent', transition: 'background 0.15s',
+          zIndex: 20,
+        }}
+        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(212,82,43,0.4)')}
+        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+      />
+
       {/* Right panel — Studio Sidebar */}
       <StudioSidebar
+        width={rightPanelWidth}
         selectedFrame={selectedFrame}
         selectedFrameIds={selectedFrameIds}
         frames={frames}

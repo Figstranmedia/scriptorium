@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useState } from 'react'
 import { useStore } from './store/useStore'
 import type { CoverConfig } from './store/useStore'
 import { TitleBar } from './components/TitleBar'
-import { DocSidebar } from './components/DocSidebar'
+import { DocTabsBar } from './components/DocTabsBar'
 import { Editor } from './components/Editor/Editor'
 import { AISidebar } from './components/Sidebar/AISidebar'
 import { SettingsModal } from './components/SettingsModal'
@@ -26,6 +26,9 @@ declare global {
       exportLayoutPDF: (html: string, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
       exportPNGPages: (pages: Array<{html: string; widthPx: number; heightPx: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number }>
       exportLayoutSVG: (svgPages: Array<{svg: string; pageIndex: number}>, title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; paths?: string[]; count?: number; filePath?: string }>
+      exportDocx: (frames: any[], title: string) => Promise<{ success?: boolean; canceled?: boolean; error?: string; filePath?: string }>
+      importDOCX: () => Promise<{ html: string; name: string; warnings?: string[]; error?: string } | null>
+      aiGenerateImage: (prompt: string, width: number, height: number, model: string) => Promise<{ success?: boolean; dataUrl?: string; error?: string }>
       ollamaPullModel: (modelName: string) => Promise<{ success?: boolean; error?: string }>
       onOllamaPullProgress: (cb: (data: { status: string; percent: number | null; done: boolean }) => void) => void
       offOllamaPullProgress: () => void
@@ -92,6 +95,9 @@ export default function App() {
       } else {
         store.createDocument('book')
       }
+      // Load saved theme preference
+      const settings = await window.api.getSettings()
+      if (settings.theme === 'light') store.setTheme('light')
     }
     load()
   }, [])
@@ -158,15 +164,29 @@ export default function App() {
     if (insert) insert(text)
   }, [])
 
+  const handleToggleTheme = useCallback(async () => {
+    const next = store.theme === 'dark' ? 'light' : 'dark'
+    store.setTheme(next)
+    await window.api.setSettings({ theme: next })
+  }, [store])
+
   return (
-    <div className="flex flex-col h-screen bg-ink-50 overflow-hidden">
+    <div
+      className="flex flex-col h-screen overflow-hidden"
+      data-theme={store.theme}
+      style={{ background: 'var(--app-bg)' }}
+    >
       <TitleBar
         store={store}
         onNewDoc={() => setShowNewDoc(true)}
         onSave={handleSaveFile}
         onSaveAs={handleSaveAs}
         onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
+        onToggleTheme={handleToggleTheme}
       />
+
+      {/* Document tabs */}
+      <DocTabsBar store={store} onNewDoc={() => setShowNewDoc(true)} onSave={handleSave} />
 
       {/* Ollama setup banner — appears only when needed */}
       {ollamaBanner && (
@@ -178,8 +198,6 @@ export default function App() {
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        <DocSidebar store={store} onNewDoc={() => setShowNewDoc(true)} onSave={handleSave} />
-
         <main className="flex-1 overflow-hidden flex flex-col">
           {store.activeDoc ? (
             <Editor

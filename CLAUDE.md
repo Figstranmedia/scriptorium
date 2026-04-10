@@ -201,6 +201,14 @@ Format buttons: PDF | PNG | SVG/Affinity
 - BLOQUE 6.1 (shape frames: rect/line/ellipse) — NOT yet implemented
 - Release & documentation — NOT yet done
 
+## Implemented features (continued)
+- ✅ BLOQUE 14: Dark/Light theme — CSS variables on `:root` / `[data-theme="light"]`, toggle in TitleBar
+- ✅ BLOQUE 12: DOCX export — `docx` npm package, IPC `export:docx`, ExportModal format option
+- ✅ UX: DocTabsBar (browser-style horizontal tabs), ToolSidebar (Affinity-style vertical tool palette)
+- ✅ UX: Spread page view in PageStrip, resizable sidebars, auto-sync Capas tab to active page
+
 ## Pending
-1. **Release v1.0** — README update, CHANGELOG, version bump, GitHub release
+1. **Release v1.1** — README update, version bump, GitHub release
 2. **BLOQUE IMPORT-MEJORADA** — Word/DOCX import (mammoth.js), PDF image extraction
+3. **BLOQUE 11** — AI image generator (placeholder in StudioSidebar → Imágenes IA tab)
+4. **BLOQUE TABLE** — Table frames in layout mode
