@@ -3,7 +3,8 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import Store from 'electron-store'
 import Anthropic from '@anthropic-ai/sdk'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from 'fs'
+import { homedir } from 'os'
 
 const store = new Store()
 
@@ -352,7 +353,8 @@ ipcMain.handle('import:docx', async () => {
   if (canceled || !filePaths[0]) return null
   try {
     const mammoth = await import('mammoth')
-    const result = await mammoth.convertToHtml({ path: filePaths[0] })
+    const buffer = readFileSync(filePaths[0])
+    const result = await mammoth.convertToHtml({ buffer })
     const name = filePaths[0].split('/').pop()?.replace(/\.docx?$/i, '') || 'Documento'
     return { html: result.value, name, warnings: result.messages?.map((m: any) => m.message) || [] }
   } catch (err: any) {
@@ -511,7 +513,21 @@ Tu rol:
 - Das opiniones directas y con criterio — no eres neutral cuando hay algo que mejorar
 - Si el usuario pega texto para editar, lo editas y devuelves versión mejorada
 - Para investigación, citas datos concretos con fuentes cuando puedes
-- Eres conciso pero completo; usas listas y encabezados cuando realmente ayudan`
+- Eres conciso pero completo; usas listas y encabezados cuando realmente ayudan
+
+ACCIONES DIRECTAS EN EL DOCUMENTO:
+Cuando el usuario pida explícitamente crear o modificar algo en el documento, incluye bloques de acción al FINAL de tu respuesta usando este formato exacto (uno por línea, sin texto adicional entre ellos):
+
+<action>{"type":"set_title","title":"Nuevo título del documento"}</action>
+<action>{"type":"create_frame","content":"Contenido del nuevo marco de texto","page":0}</action>
+<action>{"type":"replace_text","find":"texto a buscar","replace":"texto de reemplazo"}</action>
+
+Reglas de uso:
+- Solo incluye acciones cuando el usuario pida explícitamente modificar el documento ("crea", "añade", "cambia", "pon", "escribe en el documento", etc.)
+- El usuario verá cada acción como un botón "Aplicar" — son propuestas, no cambios automáticos
+- Para replace_text: "find" debe ser texto que existe en el documento
+- Para create_frame: "content" puede incluir HTML básico (<b>, <i>, <p>, <br>)
+- No incluyas acciones para análisis, sugerencias o respuestas informativas`
 
     const provider = store.get('aiProvider', 'claude') as string
 
@@ -840,5 +856,255 @@ Selected text:
     return { result }
   } catch (err: unknown) {
     return { error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+})
+
+// ─── AI Layout (multi-frame, full-canvas) ────────────────────────────────────
+
+ipcMain.handle('ai:design-layout', async (_event, data: {
+  instruction: string
+  frames: Array<{
+    id: string; type: string; page: number
+    xMM: number; yMM: number; wMM: number; hMM: number
+    contentSnippet?: string; props: Record<string, any>
+  }>
+  pageWidthMM: number; pageHeightMM: number; pageCount: number
+  selectedFrameId?: string
+}) => {
+  const frameList = data.frames.slice(0, 40).map((f, i) => {
+    const pStr = Object.entries(f.props)
+      .filter(([, v]) => v !== undefined && v !== '' && v !== 0)
+      .map(([k, v]) => `${k}:${JSON.stringify(v)}`)
+      .join(', ')
+    return `  [${i + 1}] id="${f.id}" tipo=${f.type} pág=${f.page + 1} pos=(${Math.round(f.xMM)},${Math.round(f.yMM)})mm tam=${Math.round(f.wMM)}×${Math.round(f.hMM)}mm${f.contentSnippet ? ` contenido="${f.contentSnippet}"` : ''}${pStr ? ` | ${pStr}` : ''}`
+  }).join('\n')
+
+  const systemPrompt = `Eres el motor de diseño de una aplicación de maquetación editorial (como InDesign).
+Tienes acceso TOTAL al layout: puedes editar propiedades de marcos, moverlos, redimensionarlos, crear nuevos o eliminar.
+
+DOCUMENTO: ${data.pageCount} página(s) · ${data.pageWidthMM}×${data.pageHeightMM}mm
+MARCOS (${data.frames.length} total${data.selectedFrameId ? `, seleccionado: "${data.selectedFrameId}"` : ''}):
+${frameList || '  (sin marcos)'}
+
+INSTRUCCIÓN: "${data.instruction}"
+
+Responde SOLO con un objeto JSON válido, sin texto adicional, sin bloques de código markdown:
+{
+  "ops": [
+    { "op": "update", "frameId": "ID", "props": { "fontSize": 14, "textColor": "#1a365d" } },
+    { "op": "move",   "frameId": "ID", "xMM": 20, "yMM": 30, "wMM": 170, "hMM": 50 },
+    { "op": "delete", "frameId": "ID" },
+    { "op": "create", "type": "text", "page": 0, "xMM": 20, "yMM": 20, "wMM": 170, "hMM": 30,
+      "props": { "ownContent": "Título", "fontSize": 18, "fontWeight": "bold", "textColor": "#fff", "backgroundColor": "#1a365d" } }
+  ],
+  "summary": "Descripción concisa de los cambios en español"
+}
+
+Propiedades editables (update/create): fontSize(pt), fontFamily(serif|sans|mono|nombre), fontWeight(normal|bold),
+fontStyle(normal|italic), textAlign(left|center|right|justify), textColor(#hex), backgroundColor(#hex|transparent),
+borderColor(#hex|transparent), borderWidth(px), borderStyle(solid|dashed|dotted), cornerRadius(px),
+opacity(0–1), lineHeight, letterSpacing, columns(1–4), paddingTop/Right/Bottom/Left(px), ownContent(texto plano).
+
+Reglas:
+- Aplica cambios a TODOS los marcos afectados por la instrucción, no solo al primero.
+- Para instrucciones globales ("todos los títulos", "cuerpo de texto", "fondo de página") busca patrones: fontSize grande = título, fontSize pequeño = cuerpo.
+- Para crear un fondo de página usa: type="rect", xMM=0, yMM=0, wMM=pageWidthMM, hMM=pageHeightMM.
+- Si el usuario pide "mover a la derecha/izquierda/arriba/abajo", desplaza xMM o yMM en ~10mm.
+- No elimines marcos a menos que el usuario lo pida explícitamente.
+- Si no hay nada que cambiar, devuelve ops:[].`
+
+  try {
+    const result = await callAI(systemPrompt, 1500)
+    const match = result.match(/\{[\s\S]*\}/)
+    if (!match) return { error: 'No se pudo interpretar la respuesta de diseño', ops: [] }
+    const parsed = JSON.parse(match[0])
+    return { ops: Array.isArray(parsed.ops) ? parsed.ops : [], summary: parsed.summary || '' }
+  } catch (err: unknown) {
+    return { error: err instanceof Error ? err.message : 'Error', ops: [] }
+  }
+})
+
+// ─── Debate Multi-Agente ───────────────────────────────────────────────────────
+
+let _debateController: AbortController | null = null
+
+ipcMain.handle('debate:run', async (event, config: {
+  topic: string
+  agents: Array<{ id: string; name: string; emoji: string; color: string; systemPrompt: string }>
+  maxRounds: number
+  model: string
+  docContent?: string       // document text (write mode + layout frames)
+  researchContext?: string  // active reference .md files
+}) => {
+  if (_debateController) _debateController.abort()
+  _debateController = new AbortController()
+  const { signal } = _debateController
+
+  const ollamaUrl = store.get('ollamaUrl', 'http://localhost:11434') as string
+  const model = config.model || (store.get('ollamaModel', 'llama3') as string)
+
+  const send = (data: object) => {
+    if (!event.sender.isDestroyed()) event.sender.send('debate:event', data)
+  }
+
+  const callAgent = async (messages: Array<{role: string; content: string}>): Promise<string> => {
+    const res = await fetch(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: false }),
+      signal: AbortSignal.timeout(120000),
+    })
+    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`)
+    const data = await res.json() as any
+    return (data.message?.content || '').trim()
+  }
+
+  send({ type: 'start', topic: config.topic, model })
+
+  // Build shared context block injected into every agent's system prompt
+  const contextParts: string[] = []
+  if (config.docContent?.trim()) {
+    contextParts.push(`## Documento en edición\n${config.docContent.slice(0, 6000)}`)
+  }
+  if (config.researchContext?.trim()) {
+    contextParts.push(`## Referencias de investigación activas\n${config.researchContext.slice(0, 6000)}`)
+  }
+  const sharedContext = contextParts.length
+    ? `\n\n---\nCONTEXTO DEL PROYECTO (úsalo como base para tu razonamiento):\n\n${contextParts.join('\n\n')}\n---`
+    : ''
+
+  const histories: Record<string, Array<{role: string; content: string}>> = {}
+  const roundTexts: Record<string, Record<number, string>> = {}
+  for (const a of config.agents) { histories[a.id] = []; roundTexts[a.id] = {} }
+
+  for (let round = 1; round <= config.maxRounds; round++) {
+    if (signal.aborted) break
+    send({ type: 'round_start', round, max: config.maxRounds })
+    const roundResponses: Record<string, string> = {}
+
+    for (const agent of config.agents) {
+      if (signal.aborted) break
+      send({ type: 'agent_start', agentId: agent.id, agentName: agent.name, agentEmoji: agent.emoji, agentColor: agent.color })
+
+      const userMsg = round === 1
+        ? `Debate iniciado. Tema central:\n${config.topic}\n\nPresenta tu perspectiva inicial con rigor. Señala lo que ves sólido y lo que ves problemático.`
+        : `Ronda ${round}. Posiciones de los otros agentes en la ronda anterior:\n\n${
+            config.agents
+              .filter(a => a.id !== agent.id)
+              .map(a => `**${a.name}**: ${roundTexts[a.id][round - 1]?.slice(0, 400) || '(sin respuesta)'}`)
+              .join('\n\n')
+          }\n\nResponde, refina o desafía. Avanza hacia una posición más precisa.`
+
+      histories[agent.id].push({ role: 'user', content: userMsg })
+      try {
+        const text = await callAgent([
+          { role: 'system', content: agent.systemPrompt + sharedContext },
+          ...histories[agent.id],
+        ])
+        histories[agent.id].push({ role: 'assistant', content: text })
+        roundResponses[agent.id] = text
+        roundTexts[agent.id][round] = text
+
+        // Emit word-by-word (simulated streaming from full response)
+        const words = text.split(' ')
+        for (let i = 0; i < words.length; i++) {
+          if (signal.aborted) break
+          send({ type: 'chunk', agentId: agent.id, text: words[i] + (i < words.length - 1 ? ' ' : '') })
+        }
+        send({ type: 'agent_done', agentId: agent.id, fullText: text })
+      } catch (err: any) {
+        if (signal.aborted) break
+        send({ type: 'error', message: `Error en ${agent.name}: ${err.message}` })
+      }
+    }
+
+    if (signal.aborted) break
+
+    // Mediator: detect consensus
+    if (round >= 2 && !signal.aborted) {
+      send({ type: 'mediator_thinking' })
+      try {
+        const summary = config.agents
+          .map(a => `${a.name}:\n${roundResponses[a.id]?.slice(0, 400) || ''}`)
+          .join('\n\n')
+        const mediatorText = await callAgent([
+          { role: 'system', content: 'Eres un mediador científico. Analiza si los 3 agentes han alcanzado un acuerdo sustancial (no superficial) sobre el tema. Responde SOLO con JSON válido, sin texto extra: {"reached": false, "conclusion": "", "confidence": 0.0}' },
+          { role: 'user', content: `Ronda ${round} de debate.\n\n${summary}\n\n¿Existe consenso real entre los 3 agentes?` },
+        ])
+        const jsonMatch = mediatorText.match(/\{[\s\S]*?\}/)
+        if (jsonMatch) {
+          const analysis = JSON.parse(jsonMatch[0])
+          send({ type: 'mediator_result', reached: analysis.reached || false, conclusion: analysis.conclusion || '', confidence: Number(analysis.confidence) || 0 })
+          if (analysis.reached && Number(analysis.confidence) >= 0.65) {
+            send({ type: 'consensus', conclusion: analysis.conclusion, confidence: Number(analysis.confidence), round })
+            return { ok: true, consensus: true }
+          }
+        }
+      } catch { /* ignore mediator errors */ }
+    }
+  }
+
+  if (!signal.aborted) send({ type: 'end', rounds: config.maxRounds })
+  return { ok: true, consensus: false }
+})
+
+ipcMain.handle('debate:stop', () => {
+  if (_debateController) { _debateController.abort(); _debateController = null }
+  return { ok: true }
+})
+
+// ─── Research Files ────────────────────────────────────────────────────────────
+
+function getReferencesDir(folderPath?: string): string {
+  if (folderPath) return join(folderPath, 'referencias')
+  return join(homedir(), 'Documents', 'Scriptorium', 'Referencias')
+}
+
+ipcMain.handle('research:save-file', async (_event, folderPath: string | null, filename: string, content: string) => {
+  try {
+    const dir = getReferencesDir(folderPath || undefined)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const safeName = filename.replace(/[^\w\-. áéíóúñÁÉÍÓÚÑüÜ]/g, '_')
+    const finalName = safeName.endsWith('.md') || safeName.endsWith('.txt') ? safeName : safeName + '.md'
+    const filePath = join(dir, finalName)
+    writeFileSync(filePath, content, 'utf-8')
+    return { success: true, filePath, dir }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
+ipcMain.handle('research:list-files', async (_event, folderPath: string | null) => {
+  try {
+    const dir = getReferencesDir(folderPath || undefined)
+    if (!existsSync(dir)) return { files: [], dir }
+    const files = readdirSync(dir)
+      .filter(f => f.endsWith('.md') || f.endsWith('.txt'))
+      .map(f => {
+        const fp = join(dir, f)
+        const st = statSync(fp)
+        return { name: f, path: fp, size: st.size, modified: st.mtimeMs }
+      })
+      .sort((a, b) => b.modified - a.modified)
+    return { files, dir }
+  } catch (err: any) {
+    return { error: err.message, files: [], dir: '' }
+  }
+})
+
+ipcMain.handle('research:read-file', async (_event, filePath: string) => {
+  try {
+    return { content: readFileSync(filePath, 'utf-8') }
+  } catch (err: any) {
+    return { error: err.message }
+  }
+})
+
+ipcMain.handle('research:delete-file', async (_event, filePath: string) => {
+  try {
+    unlinkSync(filePath)
+    return { success: true }
+  } catch (err: any) {
+    return { error: err.message }
   }
 })

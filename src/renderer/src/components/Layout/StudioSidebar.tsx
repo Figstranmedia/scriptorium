@@ -241,19 +241,129 @@ function PalettesPanel({ frame, onUpdate }: { frame: AnyLayoutFrame | null; onUp
   )
 }
 
-// AI Images Panel (BLOQUE 11 placeholder)
-function AIImagesPanel() {
+// AI Images Panel (BLOQUE 11)
+const AI_IMAGE_SIZES = [
+  { label: '1:1  512', w: 512,  h: 512  },
+  { label: '1:1 1024', w: 1024, h: 1024 },
+  { label: '16:9 1280', w: 1280, h: 720  },
+  { label: '4:3  1024', w: 1024, h: 768  },
+  { label: 'Retrato',  w: 768,  h: 1024 },
+]
+const AI_IMAGE_MODELS = ['flux', 'turbo', 'flux-realism', 'flux-anime', 'flux-3d']
+
+interface AIImagesPanelProps {
+  onInsertImage?: (dataUrl: string) => void
+}
+
+function AIImagesPanel({ onInsertImage }: AIImagesPanelProps) {
+  const [prompt, setPrompt]     = useState('')
+  const [sizeIdx, setSizeIdx]   = useState(0)
+  const [model, setModel]       = useState('flux')
+  const [loading, setLoading]   = useState(false)
+  const [preview, setPreview]   = useState<string | null>(null)
+  const [error, setError]       = useState<string | null>(null)
+
+  const handleGenerate = async () => {
+    if (!prompt.trim() || loading) return
+    setLoading(true)
+    setError(null)
+    setPreview(null)
+    const { w, h } = AI_IMAGE_SIZES[sizeIdx]
+    try {
+      const res = await window.api.aiGenerateImage(prompt.trim(), w, h, model)
+      if (res.error) { setError(res.error); return }
+      if (res.dataUrl) setPreview(res.dataUrl)
+    } catch (e: any) {
+      setError(e?.message ?? 'Error al generar imagen')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    background: '#242428',
+    border: `1px solid ${BORDER}`,
+    borderRadius: 6,
+    color: '#e2e2e6',
+    fontSize: 11,
+    padding: '5px 8px',
+    fontFamily: 'system-ui',
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box',
+  }
+
   return (
-    <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'Figtree, sans-serif' }}>
-      <div style={{ background: 'rgba(212,82,43,0.1)', border: `1px solid rgba(212,82,43,0.3)`, borderRadius: 10, padding: 14, textAlign: 'center' }}>
-        <div style={{ fontSize: 28, marginBottom: 8 }}>🎨</div>
-        <p style={{ color: '#e2e2e6', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Imágenes IA</p>
-        <p style={{ color: TEXT_MUTED, fontSize: 11, lineHeight: 1.5 }}>
-          Genera imágenes con FLUX o SDXL directamente en el documento.
-        </p>
+    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10, fontFamily: 'Figtree, sans-serif' }}>
+      {/* Prompt */}
+      <textarea
+        value={prompt}
+        onChange={e => setPrompt(e.target.value)}
+        placeholder="Describe la imagen…"
+        rows={3}
+        style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.4 }}
+      />
+
+      {/* Size + Model row */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        <select value={sizeIdx} onChange={e => setSizeIdx(Number(e.target.value))}
+          style={{ ...inputStyle, flex: 1 }}>
+          {AI_IMAGE_SIZES.map((s, i) => <option key={i} value={i}>{s.label}</option>)}
+        </select>
+        <select value={model} onChange={e => setModel(e.target.value)}
+          style={{ ...inputStyle, flex: 1 }}>
+          {AI_IMAGE_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
       </div>
-      <div style={{ color: TEXT_MUTED, fontSize: 10, textAlign: 'center' }}>
-        BLOQUE 11 — Próximamente en v1.1
+
+      {/* Generate button */}
+      <button
+        onClick={handleGenerate}
+        disabled={loading || !prompt.trim()}
+        style={{
+          background: loading ? '#3a3a42' : ACCENT,
+          color: '#fff', border: 'none', borderRadius: 6,
+          padding: '7px 12px', fontSize: 12, fontWeight: 600,
+          cursor: loading || !prompt.trim() ? 'not-allowed' : 'pointer',
+          opacity: !prompt.trim() ? 0.5 : 1,
+          transition: 'background 0.15s',
+        }}
+      >
+        {loading ? '⏳ Generando…' : '✨ Generar imagen'}
+      </button>
+
+      {/* Error */}
+      {error && (
+        <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 6, padding: '6px 8px', fontSize: 10, color: '#ef4444' }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {/* Preview */}
+      {preview && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <img
+            src={preview}
+            alt="Generada"
+            style={{ width: '100%', borderRadius: 6, border: `1px solid ${BORDER}`, display: 'block' }}
+          />
+          {onInsertImage && (
+            <button
+              onClick={() => onInsertImage(preview)}
+              style={{
+                background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)',
+                borderRadius: 6, color: '#4ade80', fontSize: 11, fontWeight: 600,
+                padding: '6px 10px', cursor: 'pointer',
+              }}
+            >
+              ↗ Insertar en layout
+            </button>
+          )}
+        </div>
+      )}
+
+      <div style={{ color: TEXT_MUTED, fontSize: 9, textAlign: 'center' }}>
+        Pollinations.ai · sin clave API · sin límite de uso
       </div>
     </div>
   )
@@ -464,6 +574,8 @@ export interface StudioSidebarProps {
   historyLabels: string[]
   historyCurrentIndex: number
   onJumpToHistory: (idx: number) => void
+  // AI Images
+  onInsertImage?: (dataUrl: string) => void
 }
 
 export function StudioSidebar({
@@ -474,6 +586,7 @@ export function StudioSidebar({
   masters, pageAssignments, onCreateMaster, onDeleteMaster, onUpdateMaster, onAssignMaster,
   preflightReport,
   historyLabels, historyCurrentIndex, onJumpToHistory,
+  onInsertImage,
 }: StudioSidebarProps) {
   // Section 1
   const [s1collapsed, setS1] = useState(false)
@@ -514,7 +627,7 @@ export function StudioSidebar({
         minHeight={180}
       >
         {s1tab === 'color'      && <ColorPanel    frame={selectedFrame} onUpdate={onUpdateFrame} />}
-        {s1tab === 'imagenes'   && <AIImagesPanel />}
+        {s1tab === 'imagenes'   && <AIImagesPanel onInsertImage={onInsertImage} />}
         {s1tab === 'paletas'    && <PalettesPanel frame={selectedFrame} onUpdate={onUpdateFrame} />}
         {s1tab === 'ecuaciones' && <EcuacionesPanel />}
       </SidebarSection>

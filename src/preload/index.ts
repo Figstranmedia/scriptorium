@@ -68,6 +68,26 @@ contextBridge.exposeInMainWorld('api', {
   // Fonts
   listFonts: () => ipcRenderer.invoke('fonts:list'),
 
-  // AI Design
+  // AI Design (single frame)
   aiDesign: (instruction: string, frameProps: object) => ipcRenderer.invoke('ai:design', instruction, frameProps),
+  // AI Design Layout (full canvas, multi-frame)
+  aiDesignLayout: (data: object) => ipcRenderer.invoke('ai:design-layout', data),
+
+  // Debate multi-agente
+  debateRun: (config: object) => ipcRenderer.invoke('debate:run', config),
+  debateStop: () => ipcRenderer.invoke('debate:stop'),
+  onDebateEvent: (cb: (data: any) => void) => {
+    ipcRenderer.on('debate:event', (_e, data) => cb(data))
+  },
+  offDebateEvent: () => ipcRenderer.removeAllListeners('debate:event'),
+
+  // Research files (PDF → MD extraction)
+  researchSaveFile: (folderPath: string | null, filename: string, content: string) =>
+    ipcRenderer.invoke('research:save-file', folderPath, filename, content),
+  researchListFiles: (folderPath: string | null) =>
+    ipcRenderer.invoke('research:list-files', folderPath),
+  researchReadFile: (filePath: string) =>
+    ipcRenderer.invoke('research:read-file', filePath),
+  researchDeleteFile: (filePath: string) =>
+    ipcRenderer.invoke('research:delete-file', filePath),
 })

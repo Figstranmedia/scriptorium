@@ -234,6 +234,8 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [currentColor, setCurrentColor] = useState(frame.textColor || '#1a1714')
   const fontListRef = useRef<HTMLDivElement>(null)
+  // System fonts — loaded once, fallback to COMMON_FONTS while loading
+  const [systemFonts, setSystemFonts] = useState<string[]>(COMMON_FONTS)
 
   const [showMathModal, setShowMathModal] = useState(false)
   const [mathMode, setMathMode] = useState<'inline' | 'block'>('inline')
@@ -264,6 +266,25 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
       if (attrs.color) setCurrentColor(attrs.color)
     },
   })
+
+  // Ensure TipTap gets keyboard focus as soon as the editor instance is ready.
+  // autofocus:'end' is unreliable in Electron — this is the belt-and-suspenders fix.
+  useEffect(() => {
+    if (!editor) return
+    // Two rAF to guarantee the DOM is painted and stable before focusing
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        editor.commands.focus('end')
+      })
+    })
+  }, [editor]) // runs once when editor instance becomes available
+
+  // Load all system fonts (replaces the hardcoded COMMON_FONTS list)
+  useEffect(() => {
+    window.api.listFonts().then(fonts => {
+      if (fonts && fonts.length > 0) setSystemFonts(fonts)
+    }).catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -375,7 +396,7 @@ function FrameEditor({ frame, onSave, onClose, onAIAction }: FrameEditorProps) {
               borderRadius: '0 0 4px 4px', maxHeight: 200, overflowY: 'auto',
               width: 180, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
             }}>
-              {COMMON_FONTS.filter(f => f.toLowerCase().includes(fontInput.toLowerCase())).map(f => (
+              {systemFonts.filter(f => f.toLowerCase().includes(fontInput.toLowerCase())).map(f => (
                 <div
                   key={f}
                   onMouseDown={() => applyFont(f)}
@@ -718,20 +739,30 @@ interface Props {
   onContextMenu?: (e: React.MouseEvent) => void
   onAIAction?: (action: string, text: string) => void
   scale: number
+  autoEdit?: boolean
+  onAutoEditDone?: () => void
 }
+
+type ResizeDir = 'se'|'sw'|'ne'|'nw'|'n'|'s'|'e'|'w'
 
 // ─── Main frame component ─────────────────────────────────────────────────────
 export function LayoutTextFrameComp({
   frame, threadedContent, isSelected, isLinkingFrom, isLinkTarget,
   onSelect, onUpdate, onDelete, onStartLink, onContextMenu, onAIAction, scale,
+  autoEdit, onAutoEditDone,
 }: Props) {
   const dragStart = useRef({ mx: 0, my: 0, fx: 0, fy: 0 })
-  const resizeStart = useRef({ mx: 0, my: 0, fw: 0, fh: 0 })
+  const resizeStart = useRef({ mx: 0, my: 0, fx: 0, fy: 0, fw: 0, fh: 0, dir: 'se' as ResizeDir })
   const [dragging, setDragging] = useState(false)
   const [resizing, setResizing] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const displayRef = useRef<HTMLDivElement>(null)
+  const frameRef = useRef<HTMLDivElement>(null)
   const [isOverflowing, setIsOverflowing] = useState(false)
+  const [fittedFontSize, setFittedFontSize] = useState<number | null>(null)
+  // Rotation drag
+  const [isRotating, setIsRotating] = useState(false)
+  const rotOrigin = useRef<{ cx: number; cy: number; startMouseAngle: number; initRotation: number } | null>(null)
 
   const displayContent = frame.ownContent || threadedContent
   const renderedHtml = displayContent.includes('<')
@@ -739,10 +770,78 @@ export function LayoutTextFrameComp({
     : displayContent.replace(/\n/g, '<br>')
 
   useEffect(() => {
-    if (displayRef.current && !isEditing) {
-      setIsOverflowing(displayRef.current.scrollHeight > displayRef.current.clientHeight)
+    const el = displayRef.current
+    if (!el || isEditing) return
+    // Frame not yet laid out — skip to avoid measuring against 0-height container
+    if (el.clientHeight === 0) return
+
+    const textFit = (frame as any).textFit as 'none' | 'shrink' | 'fill' | undefined
+
+    if (!textFit || textFit === 'none') {
+      setFittedFontSize(null)
+      setIsOverflowing(el.scrollHeight > el.clientHeight)
+      return
     }
-  }, [displayContent, frame.width, frame.height, isEditing])
+
+    // Binary search font size using direct DOM measurement.
+    // Save React-set value and restore after all probes.
+    const saved = el.style.fontSize
+    const probe = (size: number): boolean => {
+      el.style.fontSize = `${size}px`
+      return el.scrollHeight <= el.clientHeight
+    }
+
+    const base = frame.fontSize || 12
+    let result: number | null = null
+
+    if (textFit === 'shrink') {
+      if (probe(base)) {
+        result = null // already fits — no adjustment needed
+      } else {
+        let lo = 6, hi = base - 1, best = 6
+        while (lo <= hi) {
+          const mid = Math.ceil((lo + hi) / 2)
+          if (probe(mid)) { best = mid; lo = mid + 1 } else hi = mid - 1
+        }
+        result = best
+      }
+    } else if (textFit === 'fill') {
+      let lo = base, hi = 200, best = base
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2)
+        if (probe(mid)) { best = mid; lo = mid + 1 } else hi = mid - 1
+      }
+      result = best > base ? best : null
+    }
+
+    el.style.fontSize = saved // restore so React keeps control
+    setFittedFontSize(result)
+    setIsOverflowing(false) // fitting active → never show overflow badge
+  }, [displayContent, frame.width, frame.height, (frame as any).textFit, frame.fontSize, isEditing])
+
+  // Auto-enter edit mode when frame is freshly created (draw mode → pointer)
+  useEffect(() => {
+    if (autoEdit && !frame.locked) {
+      setIsEditing(true)
+      onAutoEditDone?.()
+    }
+  }, [autoEdit]) // intentionally only on mount / autoEdit flip
+
+  // Rotation drag
+  useEffect(() => {
+    if (!isRotating) return
+    const move = (e: MouseEvent) => {
+      if (!rotOrigin.current) return
+      const { cx, cy, startMouseAngle, initRotation } = rotOrigin.current
+      const currentAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI)
+      let delta = currentAngle - startMouseAngle
+      onUpdate({ rotation: (initRotation + delta + 360) % 360 })
+    }
+    const up = () => setIsRotating(false)
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up) }
+  }, [isRotating, onUpdate])
 
   const enterEdit = useCallback((e: React.MouseEvent) => {
     if (frame.locked) return
@@ -765,11 +864,11 @@ export function LayoutTextFrameComp({
     dragStart.current = { mx: e.clientX, my: e.clientY, fx: frame.x, fy: frame.y }
   }, [frame.x, frame.y, onSelect, isEditing])
 
-  const onMouseDownResize = useCallback((e: React.MouseEvent) => {
+  const onMouseDownResize = useCallback((e: React.MouseEvent, dir: ResizeDir) => {
     e.preventDefault(); e.stopPropagation()
     setResizing(true)
-    resizeStart.current = { mx: e.clientX, my: e.clientY, fw: frame.width, fh: frame.height }
-  }, [frame.width, frame.height])
+    resizeStart.current = { mx: e.clientX, my: e.clientY, fx: frame.x, fy: frame.y, fw: frame.width, fh: frame.height, dir }
+  }, [frame.x, frame.y, frame.width, frame.height])
 
   useEffect(() => {
     if (!dragging && !resizing) return
@@ -780,9 +879,20 @@ export function LayoutTextFrameComp({
         onUpdate({ x: dragStart.current.fx + dx, y: dragStart.current.fy + dy })
       }
       if (resizing) {
-        const dx = (e.clientX - resizeStart.current.mx) / scale
-        const dy = (e.clientY - resizeStart.current.my) / scale
-        onUpdate({ width: Math.max(80, resizeStart.current.fw + dx), height: Math.max(60, resizeStart.current.fh + dy) })
+        const { mx, my, fx, fy, fw, fh, dir } = resizeStart.current
+        const dx = (e.clientX - mx) / scale
+        const dy = (e.clientY - my) / scale
+        const MIN_W = 60, MIN_H = 40
+        let nx = fx, ny = fy, nw = fw, nh = fh
+        if (dir === 'se')                              { nw = Math.max(MIN_W, fw + dx); nh = Math.max(MIN_H, fh + dy) }
+        else if (dir === 'sw')  { nx = fx + Math.min(dx, fw - MIN_W); nw = Math.max(MIN_W, fw - dx); nh = Math.max(MIN_H, fh + dy) }
+        else if (dir === 'ne')  { ny = fy + Math.min(dy, fh - MIN_H); nw = Math.max(MIN_W, fw + dx); nh = Math.max(MIN_H, fh - dy) }
+        else if (dir === 'nw')  { nx = fx + Math.min(dx, fw - MIN_W); ny = fy + Math.min(dy, fh - MIN_H); nw = Math.max(MIN_W, fw - dx); nh = Math.max(MIN_H, fh - dy) }
+        else if (dir === 'n')   { ny = fy + Math.min(dy, fh - MIN_H); nh = Math.max(MIN_H, fh - dy) }
+        else if (dir === 's')   { nh = Math.max(MIN_H, fh + dy) }
+        else if (dir === 'e')   { nw = Math.max(MIN_W, fw + dx) }
+        else if (dir === 'w')   { nx = fx + Math.min(dx, fw - MIN_W); nw = Math.max(MIN_W, fw - dx) }
+        onUpdate({ x: nx, y: ny, width: nw, height: nh })
       }
     }
     const up = () => { setDragging(false); setResizing(false) }
@@ -795,11 +905,13 @@ export function LayoutTextFrameComp({
     : isEditing ? '#2997ff' : isSelected ? '#2997ff' : 'rgba(148,163,184,0.4)'
   const ff = resolveFontFamily(frame.fontFamily)
 
+  const displayFontSize = fittedFontSize ?? frame.fontSize
+
   const textStyle: React.CSSProperties = {
     position: 'absolute',
     top: frame.paddingTop ?? 8, left: frame.paddingLeft ?? 8,
     right: frame.paddingRight ?? 8, bottom: frame.paddingBottom ?? 8,
-    fontSize: frame.fontSize, lineHeight: frame.lineHeight,
+    fontSize: displayFontSize, lineHeight: frame.lineHeight,
     fontFamily: ff, fontWeight: frame.fontWeight || 'normal',
     fontStyle: frame.fontStyle || 'normal',
     color: frame.textColor || '#1a1714',
@@ -812,6 +924,7 @@ export function LayoutTextFrameComp({
 
   return (
     <div
+      ref={frameRef}
       style={{
         position: 'absolute',
         left: frame.x, top: frame.y,
@@ -822,12 +935,14 @@ export function LayoutTextFrameComp({
             ? `${frame.borderWidth}px ${frame.borderStyle || 'solid'} ${frame.borderColor || 'transparent'}`
             : `1px solid ${borderColor}`,
         boxSizing: 'border-box',
-        cursor: frame.locked ? 'default' : isEditing ? 'text' : dragging ? 'grabbing' : 'grab',
+        cursor: isRotating ? 'crosshair' : frame.locked ? 'default' : isEditing ? 'text' : dragging ? 'grabbing' : 'grab',
         zIndex: isEditing ? 30 : isSelected ? 20 : (frame.zIndex || 10),
         background: isEditing ? 'rgba(255,255,255,0.98)' : (frame.backgroundColor || 'transparent'),
         boxShadow: isEditing ? '0 4px 24px rgba(0,0,0,0.22)' : undefined,
         borderRadius: frame.cornerRadius || 0,
         opacity: frame.opacity !== undefined ? frame.opacity : 1,
+        transform: frame.rotation ? `rotate(${frame.rotation}deg)` : undefined,
+        transformOrigin: 'center center',
       }}
       onClick={e => { e.stopPropagation(); if (!isEditing) onSelect(e.shiftKey || e.metaKey) }}
       onDoubleClick={enterEdit}
@@ -843,9 +958,23 @@ export function LayoutTextFrameComp({
         <FrameEditor frame={frame} onSave={handleSaveContent} onClose={exitEdit} onAIAction={onAIAction} />
       )}
 
-      {/* Overflow */}
+      {/* Overflow handle — click to link to a new frame */}
       {!isEditing && isOverflowing && !frame.threadNextId && (
-        <div style={{ position: 'absolute', bottom: -1, right: -1, background: '#ef4444', color: 'white', fontSize: 9, padding: '1px 4px', fontFamily: 'sans-serif', borderRadius: '2px 0 0 0' }} title="Texto desbordado">⊠ overflow</div>
+        <div
+          title="Texto desbordado — clic para vincular a otro marco"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onStartLink() }}
+          style={{
+            position: 'absolute', bottom: -8, right: -8,
+            width: 16, height: 16, borderRadius: 3,
+            background: '#ef4444', border: '1.5px solid white',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', zIndex: 50,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'white', lineHeight: 1, fontFamily: 'system-ui', fontWeight: 700 }}>+</span>
+        </div>
       )}
 
       {/* Thread indicators */}
@@ -886,11 +1015,58 @@ export function LayoutTextFrameComp({
             </div>
           </div>
 
-          {/* Resize handle */}
+          {/* 8 resize handles */}
+          {([
+            { dir: 'nw', style: { top: -4,    left: -4,             cursor: 'nw-resize' } },
+            { dir: 'n',  style: { top: -4,    left: '50%', transform: 'translateX(-50%)', cursor: 'n-resize'  } },
+            { dir: 'ne', style: { top: -4,    right: -4,            cursor: 'ne-resize' } },
+            { dir: 'e',  style: { top: '50%', right: -4,  transform: 'translateY(-50%)', cursor: 'e-resize'  } },
+            { dir: 'se', style: { bottom: -4, right: -4,            cursor: 'se-resize' } },
+            { dir: 's',  style: { bottom: -4, left: '50%', transform: 'translateX(-50%)', cursor: 's-resize'  } },
+            { dir: 'sw', style: { bottom: -4, left: -4,             cursor: 'sw-resize' } },
+            { dir: 'w',  style: { top: '50%', left: -4,   transform: 'translateY(-50%)', cursor: 'w-resize'  } },
+          ] as const).map(({ dir, style }) => (
+            <div
+              key={dir}
+              onMouseDown={e => onMouseDownResize(e, dir as ResizeDir)}
+              style={{
+                position: 'absolute', width: 8, height: 8,
+                background: '#2997ff', borderRadius: 2,
+                border: '1px solid rgba(255,255,255,0.6)',
+                zIndex: 40,
+                ...style,
+              }}
+            />
+          ))}
+
+          {/* Rotation handle — circle above the frame center */}
           <div
-            onMouseDown={onMouseDownResize}
-            style={{ position: 'absolute', bottom: -4, right: -4, width: 10, height: 10, background: '#2997ff', cursor: 'se-resize', borderRadius: 2 }}
+            title={`Rotar marco (${Math.round(frame.rotation || 0)}°)`}
+            onMouseDown={e => {
+              e.preventDefault(); e.stopPropagation()
+              const el = frameRef.current
+              if (!el) return
+              const rect = el.getBoundingClientRect()
+              const cx = rect.left + rect.width / 2
+              const cy = rect.top + rect.height / 2
+              const startMouseAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI)
+              rotOrigin.current = { cx, cy, startMouseAngle, initRotation: frame.rotation || 0 }
+              setIsRotating(true)
+            }}
+            style={{
+              position: 'absolute', top: -30, left: '50%',
+              transform: 'translateX(-50%)',
+              width: 12, height: 12, borderRadius: '50%',
+              background: '#2997ff', border: '2px solid white',
+              cursor: 'crosshair', zIndex: 50,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+            }}
           />
+          {/* Thin line from handle to top edge */}
+          <div style={{
+            position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
+            width: 1, height: 18, background: 'rgba(41,151,255,0.5)', pointerEvents: 'none',
+          }} />
 
           {/* Column controls */}
           <div style={{ position: 'absolute', top: 22, right: -70, display: 'flex', flexDirection: 'column', gap: 2 }}>

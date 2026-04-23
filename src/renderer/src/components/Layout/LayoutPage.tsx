@@ -52,10 +52,13 @@ interface Props {
   onAddTableFrame: (pageIndex: number, x: number, y: number, w?: number, h?: number) => void
   onStartLink: (id: string) => void
   onCompleteLink: (targetId: string) => void
+  onLinkToNewFrame?: (pageIndex: number, x: number, y: number, w: number, h: number) => void
   onDoubleClickGuide?: (guideId: string) => void
   onContextMenu?: (e: React.MouseEvent, frameId: string | null) => void
   onAIAction?: (action: string, text: string) => void
   scale: number
+  autoEditFrameId?: string | null
+  onAutoEditDone?: () => void
 }
 
 export function LayoutPage({
@@ -64,7 +67,8 @@ export function LayoutPage({
   linkingFrom, drawMode, guides, snapLines = [],
   onSelectFrame, onSelectFramesByRect, onUpdateFrame, onDeleteFrame,
   onAddTextFrame, onAddImageFrame, onAddShapeFrame, onAddChartFrame, onAddTableFrame, onStartLink, onCompleteLink,
-  onDoubleClickGuide, onContextMenu, onAIAction, scale,
+  onLinkToNewFrame, onDoubleClickGuide, onContextMenu, onAIAction, scale,
+  autoEditFrameId, onAutoEditDone,
 }: Props) {
   const pageRef = useRef<HTMLDivElement>(null)
   const widthPx = mmToPx(pageSize.widthMM)
@@ -95,7 +99,12 @@ export function LayoutPage({
       e.preventDefault()
       drawStart.current = { x, y }
       setDrawRect({ x, y, w: 0, h: 0 })
-    } else if (drawMode === 'pointer' && !linkingFrom) {
+    } else if (linkingFrom) {
+      // In link mode: drag on empty page to create a new linked frame
+      e.preventDefault()
+      drawStart.current = { x, y }
+      setDrawRect({ x, y, w: 0, h: 0 })
+    } else if (drawMode === 'pointer') {
       // Start rubber-band selection
       e.preventDefault()
       selectStart.current = { x, y }
@@ -117,7 +126,12 @@ export function LayoutPage({
   const handleMouseUp = (e: React.MouseEvent) => {
     if (drawStart.current && drawRect) {
       const w = Math.max(60, drawRect.w); const h = Math.max(40, drawRect.h)
-      if (w > 10 || (drawMode === 'draw-line' && w > 10)) {
+      if (linkingFrom) {
+        // Link mode: create + link a new text frame if drag was large enough
+        if (drawRect.w > 20 && drawRect.h > 20) {
+          onLinkToNewFrame?.(pageIndex, drawRect.x, drawRect.y, w, h)
+        }
+      } else if (w > 10 || (drawMode === 'draw-line' && w > 10)) {
         if (drawMode === 'draw-text') onAddTextFrame(pageIndex, drawRect.x, drawRect.y, w, h)
         else if (drawMode === 'draw-image') onAddImageFrame(pageIndex, drawRect.x, drawRect.y, w, h)
         else if (drawMode === 'draw-rect') onAddShapeFrame(pageIndex, drawRect.x, drawRect.y, 'rect', w, Math.max(20, h))
@@ -304,6 +318,8 @@ export function LayoutPage({
               onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, frame.id) }}
               onAIAction={onAIAction}
               scale={scale}
+              autoEdit={autoEditFrameId === frame.id}
+              onAutoEditDone={onAutoEditDone}
             />
           )
         })}
@@ -334,12 +350,103 @@ export function LayoutPage({
         {pageFrames.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-slate-200 text-sm font-sans select-none">
-              {drawMode === 'pointer' ? 'Doble clic para agregar marco' : 'Arrastra para crear marco'}
+              {linkingFrom ? 'Arrastra para crear marco vinculado' : drawMode === 'pointer' ? 'Doble clic para agregar marco' : 'Arrastra para crear marco'}
             </p>
           </div>
         )}
+
+        {/* Thread connection lines — shown when a linked frame is selected */}
+        <ThreadLines
+          frames={pageFrames as LayoutFrame[]}
+          allFrames={frames as LayoutFrame[]}
+          selectedFrameIds={selectedFrameIds}
+          pageIndex={pageIndex}
+        />
       </div>
     </div>
+  )
+}
+
+// ─── Thread connection lines SVG overlay ──────────────────────────────────────
+function ThreadLines({
+  frames, allFrames, selectedFrameIds, pageIndex,
+}: {
+  frames: LayoutFrame[]
+  allFrames: LayoutFrame[]
+  selectedFrameIds: string[]
+  pageIndex: number
+}) {
+  // Only show connections when a frame in a chain is selected.
+  // Guard against circular refs with visited set to prevent infinite loops.
+  const chainIds = new Set<string>()
+  selectedFrameIds.forEach(id => {
+    const visited = new Set<string>()
+    let cur = allFrames.find(f => f.id === id) as LayoutFrame | undefined
+    // Walk forward
+    while (cur && !visited.has(cur.id)) {
+      visited.add(cur.id); chainIds.add(cur.id)
+      cur = cur.threadNextId ? allFrames.find(f => f.id === cur!.threadNextId) as LayoutFrame | undefined : undefined
+    }
+    visited.clear()
+    cur = allFrames.find(f => f.id === id) as LayoutFrame | undefined
+    // Walk backward
+    while (cur && !visited.has(cur.id)) {
+      visited.add(cur.id); chainIds.add(cur.id)
+      cur = cur.threadPrevId ? allFrames.find(f => f.id === cur!.threadPrevId) as LayoutFrame | undefined : undefined
+    }
+  })
+  if (chainIds.size === 0) return null
+
+  const lines: React.ReactNode[] = []
+  frames.forEach(src => {
+    if (!src.threadNextId || !chainIds.has(src.id)) return
+    const dst = allFrames.find(f => f.id === src.threadNextId)
+    if (!dst) return
+    // Source exit: bottom-right corner
+    const x1 = src.x + src.width
+    const y1 = src.y + src.height
+    if (dst.pageIndex === pageIndex) {
+      // Same page — draw bezier curve with arrowhead
+      const x2 = dst.x
+      const y2 = dst.y
+      const cpx = x1 + Math.max(40, Math.abs(x2 - x1) * 0.5)
+      const cpy = y1 + Math.max(20, Math.abs(y2 - y1) * 0.3)
+      lines.push(
+        <path key={src.id}
+          d={`M ${x1} ${y1} C ${cpx} ${cpy}, ${x2} ${y2 - 20}, ${x2} ${y2}`}
+          stroke="#6366f1" strokeWidth={1.5} fill="none" strokeDasharray="6 3"
+          markerEnd="url(#thread-arrow)"
+          opacity={0.8}
+        />
+      )
+    } else {
+      // Different page — draw a short exit stub + page badge
+      lines.push(
+        <g key={src.id}>
+          <line x1={x1} y1={y1} x2={x1 + 20} y2={y1 + 20} stroke="#6366f1" strokeWidth={1.5} strokeDasharray="4 2" opacity={0.8} />
+          <rect x={x1 + 16} y={y1 + 14} width={40} height={14} rx={3} fill="#6366f1" opacity={0.85} />
+          <text x={x1 + 36} y={y1 + 24} textAnchor="middle" fontSize={9} fill="white" fontFamily="system-ui">
+            {`→ P.${dst.pageIndex + 1}`}
+          </text>
+        </g>
+      )
+    }
+  })
+
+  if (lines.length === 0) return null
+
+  return (
+    <svg
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 90, overflow: 'visible' }}
+      width="100%" height="100%"
+    >
+      <defs>
+        <marker id="thread-arrow" markerWidth="7" markerHeight="5" refX="5" refY="2.5" orient="auto">
+          <polygon points="0 0, 7 2.5, 0 5" fill="#6366f1" />
+        </marker>
+      </defs>
+      {lines}
+    </svg>
   )
 }
 

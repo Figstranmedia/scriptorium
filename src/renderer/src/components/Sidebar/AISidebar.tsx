@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import type { Reference, CitationStyle } from '../../store/useStore'
 import { BibliographyPanel } from './BibliographyPanel'
+import { DebatePanel } from './DebatePanel'
+import { ResearchFilesPanel } from './ResearchFilesPanel'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface ChatMessage {
@@ -8,13 +10,20 @@ interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   thinking?: string       // Extended reasoning (Claude thinking blocks)
+  actions?: DocAction[]   // Proposed document actions from AI
   timestamp: number
 }
+
+export type DocAction =
+  | { type: 'set_title'; title: string }
+  | { type: 'create_frame'; content: string; page?: number }
+  | { type: 'replace_text'; find: string; replace: string }
 
 interface Props {
   store: any
   onSave: (id: string, data: object) => void
   onInsertCitation?: (text: string) => void
+  onCommand?: (action: DocAction) => void
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,10 +36,11 @@ function framesToText(frames: any[]): string {
     .join('\n\n')
 }
 
-function getDocContext(doc: any, conversationSummary?: string) {
+function getDocContext(doc: any, conversationSummary?: string, researchContext?: string) {
   const frameText = framesToText(doc?.layoutFrames || [])
-  const content = [doc?.content || '', frameText].filter(Boolean).join('\n\n').slice(0, 12000)
-  return { title: doc?.title || 'Sin título', content, docType: doc?.docType || 'book', conversationSummary }
+  const content = [doc?.content || '', frameText].filter(Boolean).join('\n\n').slice(0, 10000)
+  const researchSnippet = researchContext ? researchContext.slice(0, 4000) : undefined
+  return { title: doc?.title || 'Sin título', content, docType: doc?.docType || 'book', conversationSummary, researchContext: researchSnippet }
 }
 
 function buildInvestigacionMd(docTitle: string, summary: string, messages: ChatMessage[]): string {
@@ -58,21 +68,37 @@ ${sampleLines}
 `
 }
 
+// ─── Action parser ────────────────────────────────────────────────────────────
+function parseActions(text: string): { clean: string; actions: DocAction[] } {
+  const actions: DocAction[] = []
+  const clean = text.replace(/<action>([\s\S]*?)<\/action>/g, (_, json) => {
+    try {
+      const a = JSON.parse(json.trim())
+      if (a.type) actions.push(a as DocAction)
+    } catch { /* ignore malformed */ }
+    return ''
+  }).trim()
+  return { clean, actions }
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUMMARY_THRESHOLD_CHARS = 12000  // Compress conversation when content > this
 const KEEP_RECENT = 6                  // Keep last N messages after compression
 
+const WELCOME_MSG: ChatMessage = {
+  id: 'welcome',
+  role: 'assistant',
+  content: 'Hola, soy tu asistente editorial. Puedo investigar temas, analizar el texto completo de tu documento, sugerir mejoras de redacción y estructura, o simplemente conversar sobre el proyecto.\n\n¿En qué estás trabajando hoy?',
+  timestamp: 0,
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
-export function AISidebar({ store, onSave, onInsertCitation }: Props) {
+export function AISidebar({ store, onSave, onInsertCitation, onCommand }: Props) {
   const { sidebarOpen, setSidebarOpen, activeDoc, updateDocument, selectedText, pendingChatMessage, setPendingChatMessage } = store
 
-  const [tab, setTab] = useState<'chat' | 'browser' | 'bibliography'>('chat')
-  const [messages, setMessages] = useState<ChatMessage[]>([{
-    id: 'welcome',
-    role: 'assistant',
-    content: 'Hola, soy tu asistente editorial. Puedo investigar temas, analizar el texto completo de tu documento, sugerir mejoras de redacción y estructura, o simplemente conversar sobre el proyecto.\n\n¿En qué estás trabajando hoy?',
-    timestamp: Date.now(),
-  }])
+  const [tab, setTab] = useState<'chat' | 'browser' | 'bibliography' | 'debate' | 'refs'>('chat')
+  const [researchContext, setResearchContext] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MSG])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
@@ -82,8 +108,23 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
   const [urlInput, setUrlInput] = useState('https://scholar.google.com')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  // Track which doc's messages are currently loaded to avoid saving during doc switch
+  const loadedDocIdRef = useRef<string | null>(null)
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
+
+  // Load persisted chat when the active document changes
+  useEffect(() => {
+    if (!activeDoc) return
+    if (activeDoc.id === loadedDocIdRef.current) return
+    loadedDocIdRef.current = activeDoc.id
+    if (activeDoc.chatMessages?.length) {
+      setMessages(activeDoc.chatMessages as ChatMessage[])
+    } else {
+      setMessages([WELCOME_MSG])
+    }
+    setConversationSummary(activeDoc.conversationSummary || '')
+  }, [activeDoc?.id])
 
   // Sync project folder path from doc
   useEffect(() => {
@@ -120,7 +161,7 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
 
       // Keep only recent messages + add summary stub
       const recent = messages.slice(-KEEP_RECENT)
-      setMessages([
+      const compressed: ChatMessage[] = [
         {
           id: 'summary-stub-' + Date.now(),
           role: 'assistant',
@@ -128,7 +169,13 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
           timestamp: Date.now(),
         },
         ...recent,
-      ])
+      ]
+      setMessages(compressed)
+      // Persist compressed chat to document
+      if (activeDoc && loadedDocIdRef.current === activeDoc.id) {
+        updateDocument(activeDoc.id, { chatMessages: compressed, conversationSummary: res.result })
+        onSave(activeDoc.id, { ...activeDoc, chatMessages: compressed, conversationSummary: res.result })
+      }
 
       // Build and save investigacion.md
       const mdContent = buildInvestigacionMd(activeDoc?.title || 'Sin título', res.result, messages)
@@ -170,44 +217,49 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
     setInput('')
 
     const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content, timestamp: Date.now() }
-    setMessages(prev => [...prev, userMsg])
+    const withUser = [...messages, userMsg]
+    setMessages(withUser)
     setLoading(true)
 
+    let finalMessages = withUser
     try {
-      const allMessages = [...messages, userMsg]
+      const allMessages = withUser
         .filter(m => !m.content.startsWith('*[Conversación comprimida'))
         .map(m => ({ role: m.role, content: m.content }))
 
-      const docContext = getDocContext(activeDoc, conversationSummary || undefined)
+      const docContext = getDocContext(activeDoc, conversationSummary || undefined, researchContext || undefined)
       const res = await window.api.aiChat(allMessages, docContext)
 
-      if (res.result) {
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: res.result!,
-          thinking: res.thinking,
-          timestamp: Date.now(),
-        }])
-      } else {
-        setMessages(prev => [...prev, {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: `⚠️ ${res.error || 'Error desconocido'}`,
-          timestamp: Date.now(),
-        }])
+      const rawContent = res.result ?? `⚠️ ${res.error || 'Error desconocido'}`
+      const { clean, actions } = parseActions(rawContent)
+      const assistantMsg: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: clean,
+        thinking: res.thinking,
+        actions: actions.length ? actions : undefined,
+        timestamp: Date.now(),
       }
+      finalMessages = [...withUser, assistantMsg]
+      setMessages(finalMessages)
     } catch {
-      setMessages(prev => [...prev, {
+      const errMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: '⚠️ Error de conexión. Verifica Ollama o configura API key en ⚙ Ajustes.',
         timestamp: Date.now(),
-      }])
+      }
+      finalMessages = [...withUser, errMsg]
+      setMessages(finalMessages)
     } finally {
       setLoading(false)
+      // Persist chat to document
+      if (activeDoc && loadedDocIdRef.current === activeDoc.id) {
+        updateDocument(activeDoc.id, { chatMessages: finalMessages, conversationSummary })
+        onSave(activeDoc.id, { ...activeDoc, chatMessages: finalMessages, conversationSummary })
+      }
     }
-  }, [input, loading, messages, activeDoc, conversationSummary])
+  }, [input, loading, messages, activeDoc, conversationSummary, updateDocument, onSave])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
@@ -287,11 +339,14 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
           <div className="flex gap-px p-0.5 rounded" style={{ background: 'rgba(255,255,255,0.05)' }}>
             {([
               { id: 'chat', label: '💬' },
+              { id: 'debate', label: '⚡' },
+              { id: 'refs', label: '📄' },
               { id: 'bibliography', label: '📚' },
               { id: 'browser', label: '🌐' },
             ] as const).map(t => (
               <button key={t.id} onClick={() => setTab(t.id)}
                 className="px-2 py-1 rounded text-xs transition"
+                title={t.id === 'debate' ? 'Debate multi-agente' : t.id === 'refs' ? 'Referencias PDF' : undefined}
                 style={{ background: tab === t.id ? 'rgba(255,255,255,0.12)' : 'transparent', color: tab === t.id ? '#e4e4e6' : '#6e6e78' }}>
                 {t.label}
               </button>
@@ -343,7 +398,7 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
           <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4"
             style={{ scrollbarWidth: 'thin', scrollbarColor: '#2c2c30 #1a1a1e' }}>
             {messages.map(msg => (
-              <MessageBubble key={msg.id} msg={msg} />
+              <MessageBubble key={msg.id} msg={msg} onCommand={onCommand} />
             ))}
             {(loading || summarizing) && <TypingIndicator label={summarizing ? 'Resumiendo conversación...' : undefined} />}
             <div ref={messagesEndRef} />
@@ -376,6 +431,12 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
               <div className="flex items-center gap-1">
                 <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#a78bfa' }} />
                 <span className="text-[10px]" style={{ color: '#36363c' }}>Memoria activa</span>
+              </div>
+            )}
+            {researchContext && (
+              <div className="flex items-center gap-1">
+                <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#2997ff' }} />
+                <span className="text-[10px]" style={{ color: '#36363c' }}>Referencias PDF activas</span>
               </div>
             )}
           </div>
@@ -425,6 +486,38 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
         </>
       )}
 
+      {/* ── Debate tab ── */}
+      {tab === 'debate' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <DebatePanel
+            projectFolderPath={projectFolderPath || undefined}
+            activeDocTitle={activeDoc?.title}
+            initialDebate={activeDoc?.lastDebate}
+            docContent={activeDoc ? [
+              activeDoc.content || '',
+              framesToText(activeDoc.layoutFrames || []),
+            ].filter(Boolean).join('\n\n').slice(0, 8000) : undefined}
+            researchContext={researchContext || undefined}
+            onSaveDebate={(topic, model, segs) => {
+              if (!activeDoc) return
+              const lastDebate = { topic, model, segments: segs }
+              updateDocument(activeDoc.id, { lastDebate })
+              onSave(activeDoc.id, { ...activeDoc, lastDebate })
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Research files tab ── */}
+      {tab === 'refs' && (
+        <div className="flex-1 overflow-hidden flex flex-col">
+          <ResearchFilesPanel
+            projectFolderPath={projectFolderPath || undefined}
+            onContextUpdate={setResearchContext}
+          />
+        </div>
+      )}
+
       {/* ── Bibliography tab ── */}
       {tab === 'bibliography' && (
         <div className="flex-1 overflow-hidden flex flex-col">
@@ -470,7 +563,40 @@ export function AISidebar({ store, onSave, onInsertCitation }: Props) {
 }
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
-function MessageBubble({ msg }: { msg: ChatMessage }) {
+function ActionCard({ action, onCommand }: { action: DocAction; onCommand?: (a: DocAction) => void }) {
+  const [applied, setApplied] = useState(false)
+  const labels: Record<string, string> = {
+    set_title: 'Cambiar título',
+    create_frame: 'Crear marco de texto',
+    replace_text: 'Reemplazar texto',
+  }
+  const previews: Record<string, string> = {
+    set_title: `"${(action as any).title}"`,
+    create_frame: `"${((action as any).content || '').slice(0, 60)}${((action as any).content || '').length > 60 ? '…' : ''}"`,
+    replace_text: `"${(action as any).find}" → "${(action as any).replace}"`,
+  }
+  return (
+    <div className="rounded-lg px-3 py-2 flex items-center justify-between gap-2"
+      style={{ background: applied ? 'rgba(74,222,128,0.07)' : 'rgba(212,82,43,0.08)', border: `1px solid ${applied ? 'rgba(74,222,128,0.2)' : 'rgba(212,82,43,0.2)'}` }}>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: applied ? '#4ade80' : '#d4522b' }}>
+          {applied ? '✓ Aplicado' : labels[action.type] || action.type}
+        </span>
+        <span className="text-[10px] truncate" style={{ color: '#9ca3af' }}>{previews[action.type]}</span>
+      </div>
+      {!applied && onCommand && (
+        <button
+          onClick={() => { onCommand(action); setApplied(true) }}
+          className="shrink-0 px-2.5 py-1 rounded text-[10px] font-semibold transition"
+          style={{ background: '#d4522b', color: '#fff' }}>
+          Aplicar
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MessageBubble({ msg, onCommand }: { msg: ChatMessage; onCommand?: (a: DocAction) => void }) {
   const isUser = msg.role === 'user'
   const [thinkingOpen, setThinkingOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -496,19 +622,15 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             >
               <div className="flex items-center gap-1.5">
                 <span style={{ fontSize: 10, color: '#7c3aed' }}>⬡</span>
-                <span className="text-[10px] font-medium" style={{ color: '#a78bfa' }}>
-                  Razonamiento
-                </span>
-                <span className="text-[9px]" style={{ color: '#4a4850' }}>
-                  {wordCount} palabras
-                </span>
+                <span className="text-[10px] font-medium" style={{ color: '#a78bfa' }}>Razonamiento</span>
+                <span className="text-[9px]" style={{ color: '#4a4850' }}>{wordCount} palabras</span>
               </div>
               <span style={{ color: '#4a4850', fontSize: 10, transition: 'transform 0.15s', display: 'inline-block', transform: thinkingOpen ? 'rotate(180deg)' : 'none' }}>▾</span>
             </button>
             {thinkingOpen && (
               <div className="px-3 pb-3">
                 <div className="text-[10px] leading-relaxed whitespace-pre-wrap"
-                  style={{ color: '#6e6e78', fontFamily: 'system-ui', borderTop: '1px solid rgba(167,139,250,0.08)', paddingTop: 8 }}>
+                  style={{ color: '#6e6e78', fontFamily: 'system-ui', borderTop: '1px solid rgba(167,139,250,0.08)', paddingTop: 8, userSelect: 'text', cursor: 'text' }}>
                   {msg.thinking}
                 </div>
               </div>
@@ -522,17 +644,27 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             background: isUser ? 'rgba(41,151,255,0.12)' : 'rgba(255,255,255,0.04)',
             color: isUser ? '#bfdbfe' : '#c8c8cc',
             border: isUser ? '1px solid rgba(41,151,255,0.18)' : '1px solid rgba(255,255,255,0.06)',
+            userSelect: 'text', cursor: 'text',
           }}>
           {isUser
             ? <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
             : <MarkdownText content={msg.content} />
           }
-          <button onClick={() => { navigator.clipboard.writeText(msg.content); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
-            className="absolute -bottom-4 right-0 opacity-0 group-hover:opacity-100 text-[9px] transition px-1"
-            style={{ color: '#36363c' }}>
-            {copied ? '✓' : 'Copiar'}
+          {/* Copy button — visible on hover */}
+          <button
+            onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(msg.content); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+            className="absolute -bottom-5 right-0 opacity-0 group-hover:opacity-100 text-[9px] transition-opacity px-2 py-0.5 rounded"
+            style={{ color: copied ? '#4ade80' : '#6e6e78', background: 'rgba(255,255,255,0.05)', userSelect: 'none', cursor: 'pointer' }}>
+            {copied ? '✓ copiado' : '⎘ copiar'}
           </button>
         </div>
+
+        {/* Action cards */}
+        {msg.actions?.length ? (
+          <div className="flex flex-col gap-1.5 mt-0.5">
+            {msg.actions.map((a, i) => <ActionCard key={i} action={a} onCommand={onCommand} />)}
+          </div>
+        ) : null}
       </div>
     </div>
   )

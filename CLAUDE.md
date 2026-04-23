@@ -198,7 +198,6 @@ Format buttons: PDF | PNG | SVG/Affinity
 - Threaded text frames: export uses `frame.ownContent` only — distributed/threaded content
   from `threadEngine.distributeContent()` is not captured at export time. Fix: snapshot
   `contentMap` into each frame at save time, or run distributeContent at export time.
-- BLOQUE 6.1 (shape frames: rect/line/ellipse) — NOT yet implemented
 - Release & documentation — NOT yet done
 
 ## Implemented features (continued)
@@ -206,9 +205,15 @@ Format buttons: PDF | PNG | SVG/Affinity
 - ✅ BLOQUE 12: DOCX export — `docx` npm package, IPC `export:docx`, ExportModal format option
 - ✅ UX: DocTabsBar (browser-style horizontal tabs), ToolSidebar (Affinity-style vertical tool palette)
 - ✅ UX: Spread page view in PageStrip, resizable sidebars, auto-sync Capas tab to active page
+- ✅ BLOQUE DEBATE: Multi-agent debate engine (Ollama), streaming, consensus detection, export .txt/.pdf/.md
+- ✅ BLOQUE RESEARCH FILES: PDF→MD extraction, references sidebar tab, context injection into AI chat
+- ✅ BLOQUE AI LAYOUT: Natural language canvas editing (⌘K), batch ops update/move/delete/create
+- ✅ BLOQUE TABLE: Table frames in layout mode (key B, drag/resize, inline cell editing)
+- ✅ BLOQUE IMPORT-MEJORADA: DOCX import (mammoth.js), PDF as image frames
+- ✅ BLOQUE DOCUMENT SETUP: DocumentSetupModal (page size, margins, bleed, facing pages)
+- ✅ BLOQUE 11: AI image generator (Pollinations.ai, no API key) — StudioSidebar → Imágenes IA tab
+  - Prompt, size presets, model selector (flux/turbo/flux-realism/flux-anime/flux-3d)
+  - Preview + "Insertar en layout" button → adds image frame to current page
 
 ## Pending
 1. **Release v1.1** — README update, version bump, GitHub release
-2. **BLOQUE IMPORT-MEJORADA** — Word/DOCX import (mammoth.js), PDF image extraction
-3. **BLOQUE 11** — AI image generator (placeholder in StudioSidebar → Imágenes IA tab)
-4. **BLOQUE TABLE** — Table frames in layout mode

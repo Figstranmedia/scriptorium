@@ -5,9 +5,12 @@ import { TitleBar } from './components/TitleBar'
 import { DocTabsBar } from './components/DocTabsBar'
 import { Editor } from './components/Editor/Editor'
 import { AISidebar } from './components/Sidebar/AISidebar'
+import type { DocAction } from './components/Sidebar/AISidebar'
 import { SettingsModal } from './components/SettingsModal'
 import { NewDocModal } from './components/NewDocModal'
 import { ExportModal } from './components/ExportModal'
+import { DocumentSetupModal, buildSetupFromDocument } from './components/DocumentSetupModal'
+import type { DocumentSetup } from './components/DocumentSetupModal'
 import { OllamaSetupBanner } from './components/OllamaSetupBanner'
 import { ModelSetupModal } from './components/ModelSetupModal'
 
@@ -47,9 +50,18 @@ declare global {
       importPDF: () => Promise<{ data: string; name: string } | null>
       listFonts: () => Promise<string[]>
       aiDesign: (instruction: string, frameProps: object) => Promise<{ changes?: Record<string, unknown>; error?: string }>
+      aiDesignLayout: (data: object) => Promise<{ ops?: any[]; summary?: string; error?: string }>
       openFile: () => Promise<{ data?: any; filePath?: string; canceled?: boolean; error?: string }>
       showInFinder: (filePath: string) => Promise<{ success?: boolean }>
       printDoc: () => Promise<{ success?: boolean; error?: string }>
+      debateRun: (config: object) => Promise<{ ok?: boolean; consensus?: boolean; error?: string }>
+      debateStop: () => Promise<{ ok?: boolean }>
+      onDebateEvent: (cb: (data: any) => void) => void
+      offDebateEvent: () => void
+      researchSaveFile: (folderPath: string | null, filename: string, content: string) => Promise<{ success?: boolean; filePath?: string; dir?: string; error?: string }>
+      researchListFiles: (folderPath: string | null) => Promise<{ files: Array<{name: string; path: string; size: number; modified: number}>; dir?: string; error?: string }>
+      researchReadFile: (filePath: string) => Promise<{ content?: string; error?: string }>
+      researchDeleteFile: (filePath: string) => Promise<{ success?: boolean; error?: string }>
     }
   }
 }
@@ -57,6 +69,7 @@ declare global {
 export default function App() {
   const store = useStore()
   const [showNewDoc, setShowNewDoc] = useState(false)
+  const [showDocSetup, setShowDocSetup] = useState(false)
   const [ollamaBanner, setOllamaBanner] = useState<'not-running' | 'no-models' | null>(null)
   const [showModelSetup, setShowModelSetup] = useState(false)
   const [installedModels, setInstalledModels] = useState<string[]>([])
@@ -134,7 +147,36 @@ export default function App() {
     }
   }, [store])
 
-  // ⌘S / ⌘⇧S / ⌘O global shortcuts
+  const handleOpenFile = useCallback(async () => {
+    const res = await window.api.openFile()
+    if (res.canceled || !res.data) return
+    if (res.error) { alert(res.error); return }
+    const doc = res.data as any
+    if (!doc.id) return
+    doc.filePath = res.filePath
+    doc.updatedAt = Date.now()
+    store.upsertDocument(doc)
+    store.setActiveDocId(doc.id)
+    await window.api.saveDocument(doc.id, doc)
+  }, [store])
+
+  const handleShowInFinder = useCallback(async () => {
+    const doc = store.activeDoc as any
+    if (!doc?.filePath) return
+    await window.api.showInFinder(doc.filePath)
+  }, [store])
+
+  const handlePrint = useCallback(async () => {
+    await window.api.printDoc()
+  }, [])
+
+  // Sync window title with active document
+  useEffect(() => {
+    const title = store.activeDoc?.title
+    document.title = title ? `${title} — Scriptorium` : 'Scriptorium'
+  }, [store.activeDoc?.title])
+
+  // ⌘S / ⌘⇧S / ⌘O / ⌘N / ⌘W global shortcuts — MUST be after all handlers declared
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -146,10 +188,29 @@ export default function App() {
         e.preventDefault()
         handleOpenFile()
       }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'n') {
+        // Only intercept if no text input / editor is focused
+        const target = e.target as HTMLElement
+        if (!target.isContentEditable && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault()
+          setShowNewDoc(true)
+        }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'w') {
+        const target = e.target as HTMLElement
+        if (!target.isContentEditable && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault()
+          const doc = store.activeDoc
+          if (doc && confirm(`¿Cerrar "${doc.title || 'Sin título'}"?`)) {
+            window.api.deleteDocument(doc.id)
+            store.deleteDocument(doc.id)
+          }
+        }
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [handleSaveFile, handleSaveAs, handleOpenFile])
+  }, [handleSaveFile, handleSaveAs, handleOpenFile, store])
 
   const handleAIAction = useCallback((action: string, text: string) => {
     if (!text.trim()) return
@@ -171,29 +232,48 @@ export default function App() {
     if (insert) insert(text)
   }, [])
 
-  const handleOpenFile = useCallback(async () => {
-    const res = await window.api.openFile()
-    if (res.canceled || !res.data) return
-    if (res.error) { alert(res.error); return }
-    const doc = res.data as any
-    // Ensure the doc has a valid id and updatedAt
-    if (!doc.id) return
-    doc.filePath = res.filePath
-    doc.updatedAt = Date.now()
-    store.upsertDocument(doc)
-    store.setActiveDocId(doc.id)
-    await window.api.saveDocument(doc.id, doc)
-  }, [store])
+  // Execute AI document commands from chat
+  const handleDocCommand = useCallback((action: DocAction) => {
+    if (!store.activeDoc) return
+    const doc = store.activeDoc
+    switch (action.type) {
+      case 'set_title':
+        store.updateDocument(doc.id, { title: action.title })
+        handleSave(doc.id, { ...doc, title: action.title })
+        break
+      case 'create_frame': {
+        const fn = (window as any).__layoutCreateTextFrame
+        if (fn) fn(action.content, action.page ?? 0)
+        break
+      }
+      case 'replace_text': {
+        // Replace in document write-mode content
+        if (doc.content?.includes(action.find)) {
+          const newContent = doc.content.replaceAll(action.find, action.replace)
+          store.updateDocument(doc.id, { content: newContent })
+          handleSave(doc.id, { ...doc, content: newContent })
+        }
+        break
+      }
+    }
+  }, [store, handleSave])
 
-  const handleShowInFinder = useCallback(async () => {
-    const doc = store.activeDoc as any
-    if (!doc?.filePath) return
-    await window.api.showInFinder(doc.filePath)
+  const handleApplyDocSetup = useCallback((setup: DocumentSetup) => {
+    if (!store.activeDoc) return
+    store.updateDocument(store.activeDoc.id, {
+      layoutPageSize: setup.pageSizeKey,
+      layoutPageCount: setup.pageCount,
+      facingPages: setup.facingPages,
+      layoutCustomWidthMM: setup.customWidthMM,
+      layoutCustomHeightMM: setup.customHeightMM,
+      marginTopMM: setup.marginTopMM,
+      marginBottomMM: setup.marginBottomMM,
+      marginInnerMM: setup.marginInnerMM,
+      marginOuterMM: setup.marginOuterMM,
+      bleedMM: setup.bleedMM,
+    })
+    setShowDocSetup(false)
   }, [store])
-
-  const handlePrint = useCallback(async () => {
-    await window.api.printDoc()
-  }, [])
 
   const handleToggleTheme = useCallback(async () => {
     const next = store.theme === 'dark' ? 'light' : 'dark'
@@ -217,6 +297,7 @@ export default function App() {
         onPrint={handlePrint}
         onCloseDoc={() => { if (store.activeDoc) store.deleteDocument(store.activeDoc.id) }}
         onToggleTheme={handleToggleTheme}
+        onDocSetup={() => setShowDocSetup(true)}
       />
 
       {/* Document tabs */}
@@ -255,7 +336,7 @@ export default function App() {
           )}
         </main>
 
-        <AISidebar store={store} onSave={handleSave} onInsertCitation={handleInsertCitation} />
+        <AISidebar store={store} onSave={handleSave} onInsertCitation={handleInsertCitation} onCommand={handleDocCommand} />
       </div>
 
       {store.showSettings && (
@@ -274,6 +355,13 @@ export default function App() {
             store.setOllamaActiveModel(modelId)
             setShowModelSetup(false)
           }}
+        />
+      )}
+      {showDocSetup && store.activeDoc && (
+        <DocumentSetupModal
+          setup={buildSetupFromDocument(store.activeDoc)}
+          onApply={handleApplyDocSetup}
+          onClose={() => setShowDocSetup(false)}
         />
       )}
       {store.showExport && store.activeDoc && (

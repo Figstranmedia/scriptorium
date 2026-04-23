@@ -92,6 +92,20 @@ export interface Document {
   coverConfig?: CoverConfig
   filePath?: string
   projectFolderPath?: string
+  // Document setup (page dimensions, margins, bleed)
+  facingPages?: boolean
+  layoutCustomWidthMM?: number
+  layoutCustomHeightMM?: number
+  marginTopMM?: number
+  marginBottomMM?: number
+  marginInnerMM?: number
+  marginOuterMM?: number
+  bleedMM?: number
+  // Persisted AI chat state
+  chatMessages?: any[]
+  conversationSummary?: string
+  // Persisted last debate
+  lastDebate?: { topic: string; model: string; segments: any[] }
   createdAt: number
   updatedAt: number
 }

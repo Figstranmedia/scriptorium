@@ -13,6 +13,7 @@ interface Props {
   onImportPDFAsImages?: () => void
   onCloseDoc?: () => void
   onToggleTheme?: () => void
+  onDocSetup?: () => void
 }
 
 // ─── Submenu item types ──────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ function OllamaDot({ status, model }: { status: string; model: string }) {
 }
 
 // ─── Main TitleBar ────────────────────────────────────────────────────────────
-export function TitleBar({ store, onNewDoc, onOpenFile, onSave, onSaveAs, onShowInFinder, onPrint, onImportPDF, onImportDOCX, onImportPDFAsImages, onCloseDoc, onToggleTheme }: Props) {
+export function TitleBar({ store, onNewDoc, onOpenFile, onSave, onSaveAs, onShowInFinder, onPrint, onImportPDF, onImportDOCX, onImportPDFAsImages, onCloseDoc, onToggleTheme, onDocSetup }: Props) {
   const doc = store.activeDoc
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -252,7 +253,7 @@ export function TitleBar({ store, onNewDoc, onOpenFile, onSave, onSaveAs, onShow
       type: 'item',
       label: 'Preferencias del documento',
       disabled: !doc,
-      action: () => store.setShowSettings(true),
+      action: () => onDocSetup ? onDocSetup() : store.setShowSettings(true),
     },
     {
       type: 'item',

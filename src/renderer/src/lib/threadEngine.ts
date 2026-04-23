@@ -42,6 +42,10 @@ export interface LayoutFrame {
   borderStyle: 'solid' | 'dashed' | 'dotted'
   cornerRadius: number
   opacity: number
+  // Transform
+  rotation?: number   // degrees, 0 = no rotation
+  // Text fitting
+  textFit?: 'none' | 'shrink' | 'fill'
 }
 
 export interface LayoutImageFrame {

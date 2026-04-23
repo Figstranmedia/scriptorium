@@ -264,6 +264,40 @@ export function LayoutPropertiesPanel({ frame, styles = [], onUpdate, onUnlink, 
             </div>
           ))}
         </div>
+        <NumField
+          label="Rotación"
+          value={Math.round((tf as any).rotation || 0)}
+          min={0} max={360} step={1}
+          onChange={v => upd({ rotation: v } as any)}
+          unit="°"
+        />
+        {/* Text fit */}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 9, color: MUTED, marginBottom: 4, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Ajuste de texto</div>
+          <div style={{ display: 'flex', gap: 3 }}>
+            {([
+              { v: 'none',   l: '⊡ Normal',  title: 'Sin ajuste — el texto desborda' },
+              { v: 'shrink', l: '⊳ Reducir', title: 'Reduce el tamaño de fuente para que todo quepa' },
+              { v: 'fill',   l: '⊲ Ampliar', title: 'Agranda la fuente para llenar el marco' },
+            ] as const).map(opt => {
+              const active = ((tf as any).textFit || 'none') === opt.v
+              return (
+                <button
+                  key={opt.v}
+                  title={opt.title}
+                  onClick={() => upd({ textFit: opt.v } as any)}
+                  style={{
+                    flex: 1, padding: '4px 2px', borderRadius: 5, cursor: 'pointer', fontSize: 10,
+                    fontFamily: 'Figtree, sans-serif',
+                    border: `1px solid ${active ? ACCENT : BORDER}`,
+                    background: active ? 'rgba(212,82,43,0.15)' : ROW_BG,
+                    color: active ? ACCENT : MUTED,
+                  }}
+                >{opt.l}</button>
+              )
+            })}
+          </div>
+        </div>
       </Accordion>
 
       {/* Estilo de texto */}

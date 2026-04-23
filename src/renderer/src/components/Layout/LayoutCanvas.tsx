@@ -3,7 +3,7 @@ import type { AnyLayoutFrame, LayoutFrame, LayoutImageFrame, LayoutShapeFrame } 
 import {
   createDefaultFrame, createDefaultImageFrame, createDefaultShapeFrame, createDefaultChartFrame,
   createDefaultTableFrame,
-  distributeContent, isImageFrame, isShapeFrame
+  distributeContent, isImageFrame, isShapeFrame, isChartFrame, isTableFrame
 } from '../../lib/threadEngine'
 import { LayoutPage, PAGE_SIZES, mmToPx, type PageSize, type DrawMode } from './LayoutPage'
 import { PreflightBadge, PreflightPanel } from './PreflightPanel'
@@ -11,6 +11,8 @@ import { MasterPagePanel, createDefaultMaster, type MasterPage } from './MasterP
 import { PageStrip } from './PageStrip'
 import { ContextMenu } from './ContextMenu'
 import { AIDesignPanel } from './AIDesignPanel'
+import { AILayoutBar } from './AILayoutBar'
+import type { LayoutOp } from './AILayoutBar'
 import { runPreflight } from '../../lib/preflight'
 import { parsePDF, renderPDFToImages } from '../../lib/pdfImport'
 import { parseDocxHTML } from '../../lib/docxImport'
@@ -60,27 +62,87 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   const [clipboard, setClipboard] = useState<AnyLayoutFrame[]>([])
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [showAIDesign, setShowAIDesign] = useState(false)
+  const [showAILayout, setShowAILayout] = useState(false)
   const [spreadPages, setSpreadPages] = useState<number[]>((document as any).layoutSpreadPages || [])
   const [leftPanelWidth, setLeftPanelWidth] = useState(96)
   const [rightPanelWidth, setRightPanelWidth] = useState(224)
+  const [autoEditFrameId, setAutoEditFrameId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const leftDragRef = useRef<{ startX: number; startW: number } | null>(null)
   const rightDragRef = useRef<{ startX: number; startW: number } | null>(null)
+  // Spacebar panning
+  const spaceHeld = useRef(false)
+  const panOrigin = useRef<{ mx: number; my: number; sl: number; st: number } | null>(null)
+  const [panning, setPanning] = useState(false)
+
+  // Sync page size and count from document when changed externally (e.g. DocumentSetupModal)
+  useEffect(() => {
+    const key = document.layoutPageSize
+    if (key && key !== pageSizeKey) setPageSizeKey(key)
+  }, [document.layoutPageSize])
+
+  useEffect(() => {
+    const count = document.layoutPageCount
+    if (count && count > 0 && count !== pageCount) setPageCount(count)
+  }, [document.layoutPageCount])
 
   // Undo/Redo history
   const history = useRef<AnyLayoutFrame[][]>([JSON.parse(JSON.stringify(document.layoutFrames || []))])
   const historyIndex = useRef(0)
   const historyLabels = useRef<string[]>(['Estado inicial'])
 
-  const pageSize: PageSize = PAGE_SIZES[pageSizeKey] || PAGE_SIZES.A4
+  // Resolve page size — supports 'custom' with explicit dimensions from document
+  const pageSize: PageSize = pageSizeKey === 'custom' && (document as any).layoutCustomWidthMM && (document as any).layoutCustomHeightMM
+    ? { name: 'custom', widthMM: (document as any).layoutCustomWidthMM, heightMM: (document as any).layoutCustomHeightMM }
+    : PAGE_SIZES[pageSizeKey] || PAGE_SIZES.A4
+
   const selectedFrameId = selectedFrameIds[selectedFrameIds.length - 1] ?? null
 
   // Content distribution for threaded frames
   const contentMap = useMemo(() => {
-    const textFrames = frames.filter(f => !isImageFrame(f)) as LayoutFrame[]
-    const threadFrames = textFrames.filter(f => !f.ownContent && (f.threadNextId || f.threadPrevId || textFrames.length <= 1))
-    if (threadFrames.length === 0) return new Map<string, string>()
-    return distributeContent(document.content || '', threadFrames)
+    const textFrames = frames.filter(
+      f => !isImageFrame(f) && !isShapeFrame(f) && !isChartFrame(f) && !isTableFrame(f)
+    ) as LayoutFrame[]
+
+    const result = new Map<string, string>()
+    const frameMap = new Map(textFrames.map(f => [f.id, f]))
+
+    // ── Layout-mode chains: head frame has ownContent + threadNextId ──────────
+    // Find each chain head (has content, has a next frame, no valid previous)
+    textFrames.forEach(frame => {
+      if (!frame.ownContent || !frame.threadNextId) return
+      const hasPrev = frame.threadPrevId && frameMap.has(frame.threadPrevId)
+      if (hasPrev) return // not the head, skip
+
+      // Build the full chain from this head
+      const chain: LayoutFrame[] = []
+      const visited = new Set<string>()
+      let cur: LayoutFrame | undefined = frame
+      while (cur && !visited.has(cur.id)) {
+        chain.push(cur)
+        visited.add(cur.id)
+        cur = cur.threadNextId ? frameMap.get(cur.threadNextId) : undefined
+      }
+      if (chain.length <= 1) return
+
+      // Distribute the head's ownContent across all frames in the chain
+      const distributed = distributeContent(frame.ownContent, chain)
+      // The head keeps its ownContent for editing; following frames get distributed slices
+      distributed.forEach((html, id) => {
+        if (id !== frame.id) result.set(id, html)
+      })
+    })
+
+    // ── Write-mode import: distribute document.content across empty threaded frames ──
+    const emptyThreadFrames = textFrames.filter(
+      f => !f.ownContent && (f.threadNextId || f.threadPrevId)
+    )
+    if (emptyThreadFrames.length > 0 && document.content) {
+      const docDist = distributeContent(document.content, emptyThreadFrames)
+      docDist.forEach((html, id) => result.set(id, html))
+    }
+
+    return result
   }, [document.content, frames])
 
   const preflightReport = useMemo(() => runPreflight(frames, contentMap, pageCount), [frames, contentMap, pageCount])
@@ -115,6 +177,12 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     setFrames(next)
     saveLayout(next)
   }, [])
+
+  const saveCheckpoint = useCallback(() => {
+    const label = window.prompt('Nombre del punto de control:', `Checkpoint ${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`)
+    if (!label) return
+    pushHistory(frames, `⊙ ${label}`)
+  }, [frames, pushHistory])
 
   // ── Save ─────────────────────────────────────────────────────────────────────
   const saveLayout = useCallback((
@@ -193,6 +261,7 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       return next
     })
     setSelectedFrameIds([frame.id])
+    setAutoEditFrameId(frame.id)
     setDrawMode('pointer')
   }, [saveLayout, pushHistory])
 
@@ -209,6 +278,21 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     setSelectedFrameIds([frame.id])
     setDrawMode('pointer')
   }, [saveLayout, pushHistory])
+
+  // Insert AI-generated image into the current page as an image frame
+  const handleInsertGeneratedImage = useCallback((dataUrl: string) => {
+    const frame = createDefaultImageFrame(activePageIndex, 60, 60)
+    frame.src = dataUrl
+    frame.width = 300
+    frame.height = 300
+    setFrames(prev => {
+      const next = [...prev, frame]
+      pushHistory(next, 'Insertar imagen IA')
+      saveLayout(next)
+      return next
+    })
+    setSelectedFrameIds([frame.id])
+  }, [activePageIndex, saveLayout, pushHistory])
 
   const handleAddShapeFrame = useCallback((
     pageIndex: number, x: number, y: number,
@@ -449,6 +533,31 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   // ── Threading ────────────────────────────────────────────────────────────────
   const handleStartLink = useCallback((id: string) => setLinkingFrom(id), [])
 
+  // Called from LayoutPage when user drags on empty page background while in link mode.
+  // Creates a new text frame and immediately threads it to the current linkingFrom frame.
+  const handleLinkToNewFrame = useCallback((pageIndex: number, x: number, y: number, w: number, h: number) => {
+    if (!linkingFrom) return
+    const sourceId = linkingFrom
+    const newFrame = createDefaultFrame(pageIndex, x, y, { width: w, height: h })
+    const linked = { ...newFrame, threadPrevId: sourceId }
+    setFrames(prev => {
+      const next = prev.map(f => {
+        if (!isImageFrame(f)) {
+          const tf = f as LayoutFrame
+          if (tf.id === sourceId) return { ...tf, threadNextId: newFrame.id }
+        }
+        return f
+      })
+      next.push(linked)
+      pushHistory(next, 'Vincular nuevo marco')
+      saveLayout(next)
+      return next
+    })
+    setSelectedFrameIds([newFrame.id])
+    setLinkingFrom(null)
+    setAutoEditFrameId(null) // new linked frame: don't auto-edit, let user decide
+  }, [linkingFrom, saveLayout, pushHistory])
+
   const handleCompleteLink = useCallback((targetId: string) => {
     if (!linkingFrom || linkingFrom === targetId) { setLinkingFrom(null); return }
     setFrames(prev => {
@@ -588,6 +697,97 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     })
   }, [pageCount, saveLayout])
 
+  // ── AI Layout — full-canvas multi-frame operations ───────────────────────────
+  const handleAILayout = useCallback(async (instruction: string) => {
+    const PX_PER_MM = 96 / 25.4
+    const pxToMM = (px: number) => px / PX_PER_MM
+
+    // Build compact frame descriptors
+    const frameData = frames.map(f => {
+      const isImg = 'src' in f
+      const isShape = 'shapeType' in f
+      const ff = f as any
+      const contentSnippet = !isImg && !isShape
+        ? (ff.ownContent || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60)
+        : undefined
+      const props: Record<string, any> = {}
+      if (!isImg && !isShape) {
+        if (ff.fontSize) props.fontSize = ff.fontSize
+        if (ff.fontFamily) props.fontFamily = ff.fontFamily
+        if (ff.fontWeight && ff.fontWeight !== 'normal') props.fontWeight = ff.fontWeight
+        if (ff.textColor) props.textColor = ff.textColor
+        if (ff.textAlign) props.textAlign = ff.textAlign
+        if (ff.backgroundColor && ff.backgroundColor !== 'transparent') props.backgroundColor = ff.backgroundColor
+        if (ff.lineHeight) props.lineHeight = ff.lineHeight
+      }
+      if (isShape) { props.shapeType = ff.shapeType; props.fill = ff.fill }
+      return {
+        id: f.id, type: isImg ? 'image' : isShape ? (ff.shapeType || 'rect') : 'text',
+        page: f.pageIndex,
+        xMM: Math.round(pxToMM(f.x) * 10) / 10,
+        yMM: Math.round(pxToMM(f.y) * 10) / 10,
+        wMM: Math.round(pxToMM(f.width) * 10) / 10,
+        hMM: Math.round(pxToMM(f.height) * 10) / 10,
+        contentSnippet, props,
+      }
+    })
+
+    const res = await window.api.aiDesignLayout({
+      instruction,
+      frames: frameData,
+      pageWidthMM: pageSize.widthMM,
+      pageHeightMM: pageSize.heightMM,
+      pageCount,
+      selectedFrameId: selectedFrameId || undefined,
+    })
+
+    if (res.error || !res.ops?.length) {
+      return { ops: [], summary: res.summary || '', error: res.error }
+    }
+
+    // Apply all operations against current snapshot
+    let next = [...frames]
+    for (const op of res.ops!) {
+      if (op.op === 'update') {
+        next = next.map(f => f.id === op.frameId ? { ...f, ...op.props } : f)
+      } else if (op.op === 'move') {
+        next = next.map(f => {
+          if (f.id !== op.frameId) return f
+          return {
+            ...f,
+            x: Math.round(op.xMM * PX_PER_MM),
+            y: Math.round(op.yMM * PX_PER_MM),
+            ...(op.wMM !== undefined ? { width: Math.round(op.wMM * PX_PER_MM) } : {}),
+            ...(op.hMM !== undefined ? { height: Math.round(op.hMM * PX_PER_MM) } : {}),
+          }
+        })
+      } else if (op.op === 'delete') {
+        next = next.filter(f => f.id !== op.frameId)
+      } else if (op.op === 'create') {
+        const page = Math.min(op.page ?? 0, pageCount - 1)
+        const x = Math.round((op.xMM ?? 20) * PX_PER_MM)
+        const y = Math.round((op.yMM ?? 20) * PX_PER_MM)
+        const w = Math.round((op.wMM ?? 100) * PX_PER_MM)
+        const h = Math.round((op.hMM ?? 40) * PX_PER_MM)
+        let newFrame: AnyLayoutFrame
+        if (op.type === 'image') {
+          newFrame = { ...createDefaultImageFrame(page, x, y), width: w, height: h }
+        } else if (op.type === 'rect' || op.type === 'ellipse' || op.type === 'line') {
+          newFrame = createDefaultShapeFrame(page, x, y, op.type as any, { width: w, height: h })
+          if (op.props) Object.assign(newFrame, op.props)
+        } else {
+          newFrame = { ...createDefaultFrame(page, x, y, { width: w, height: h }), ...(op.props || {}) }
+        }
+        next = [...next, newFrame]
+      }
+    }
+    pushHistory(next, `IA: ${instruction.slice(0, 40)}`)
+    setFrames(next)
+    saveLayout(next)
+
+    return { ops: res.ops, summary: res.summary || '', error: undefined }
+  }, [frames, pageSize, pageCount, selectedFrameId, saveLayout, pushHistory])
+
   const scrollToPage = useCallback((pageIndex: number) => {
     setActivePageIndex(pageIndex)
     if (scrollRef.current) {
@@ -607,7 +807,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       const newPageSizeKey = parsed.pageSizeName
       const newPageSize = PAGE_SIZES[newPageSizeKey] || PAGE_SIZES.A4
       const ptToPx = 96 / 72
-      const newFrames: LayoutFrame[] = parsed.blocks.map(block =>
+
+      const textFrames: LayoutFrame[] = parsed.blocks.map(block =>
         createDefaultFrame(block.pageIndex, Math.max(0, block.x * ptToPx), Math.max(0, block.y * ptToPx), {
           width: Math.min(block.width * ptToPx, mmToPx(newPageSize.widthMM) - block.x * ptToPx),
           height: Math.max(20, block.height * ptToPx + 8),
@@ -617,6 +818,16 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
           paddingTop: 4, paddingRight: 6, paddingBottom: 4, paddingLeft: 6,
         })
       )
+
+      const imageFrames: LayoutImageFrame[] = (parsed.graphicRegions ?? []).map(region => ({
+        ...createDefaultImageFrame(region.pageIndex, region.x * ptToPx, region.y * ptToPx),
+        width: region.width * ptToPx,
+        height: region.height * ptToPx,
+        src: region.dataUrl,
+        fit: 'fit' as const,
+      }))
+
+      const newFrames = [...textFrames, ...imageFrames]
       const newPageCount = Math.max(pageCount, parsed.pageCount)
       setFrames(prev => {
         const next = [...prev, ...newFrames]
@@ -626,7 +837,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
       })
       setPageCount(newPageCount)
       setPageSizeKey(newPageSizeKey)
-      alert(`PDF importado: ${name}\n${newFrames.length} bloques de texto en ${parsed.pageCount} páginas.`)
+      const imgMsg = imageFrames.length > 0 ? `\n${imageFrames.length} gráfica(s) detectada(s)` : ''
+      alert(`PDF importado: ${name}\n${textFrames.length} bloques de texto en ${parsed.pageCount} páginas.${imgMsg}`)
     } catch (err) {
       alert('Error al importar PDF: ' + (err instanceof Error ? err.message : String(err)))
     } finally {
@@ -749,6 +961,24 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     return () => { delete (window as any).__triggerDOCXImport }
   }, [handleImportDOCX])
 
+  // Expose layout commands for AI chat actions
+  useEffect(() => {
+    (window as any).__layoutCreateTextFrame = (content: string, pageIndex = 0) => {
+      const frame = createDefaultFrame(pageIndex, 60, 80)
+      frame.width = 480
+      frame.height = 200
+      frame.ownContent = content
+      setFrames(prev => {
+        const next = [...prev, frame]
+        pushHistory(next, 'IA: crear marco')
+        saveLayout(next)
+        return next
+      })
+      setSelectedFrameIds([frame.id])
+    }
+    return () => { delete (window as any).__layoutCreateTextFrame }
+  }, [saveLayout, pushHistory])
+
   // ── Context menu ─────────────────────────────────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent, frameId: string | null) => {
     e.preventDefault()
@@ -796,8 +1026,18 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
   // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName
+      const target = e.target as HTMLElement
+      const tag = target.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      // TipTap uses a contenteditable div. Check target AND document.activeElement
+      // because Electron sometimes reports a stale target when TipTap has focus.
+      const active = document.activeElement as HTMLElement | null
+      const inEditor =
+        target.isContentEditable ||
+        !!target.closest?.('[contenteditable="true"]') ||
+        !!active?.isContentEditable ||
+        !!active?.closest?.('[contenteditable="true"]')
+      if (inEditor) return
 
       // Undo/Redo
       if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return }
@@ -810,6 +1050,9 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
 
       // Select all
       if ((e.metaKey || e.ctrlKey) && e.key === 'a') { e.preventDefault(); setSelectedFrameIds(frames.map(f => f.id)); return }
+
+      // AI Layout (⌘K)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); setShowAILayout(v => !v); return }
 
       // Delete
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -858,13 +1101,95 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [selectedFrameIds, frames, undo, redo, copyFrames, pasteFrames, duplicateFrames, handleDeleteFrame, saveLayout, pageSize])
 
-  // Zoom with Ctrl/Cmd + scroll
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (e.metaKey || e.ctrlKey) {
+  // Spacebar panning — hold space + drag to pan freely
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      const t = e.target as HTMLElement
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t.isContentEditable ||
+        !!t.closest?.('[contenteditable="true"]') ||
+        !!(document.activeElement as HTMLElement | null)?.isContentEditable ||
+        !!(document.activeElement as HTMLElement | null)?.closest?.('[contenteditable="true"]')
+      ) return
       e.preventDefault()
-      setScale(prev => Math.max(0.25, Math.min(4.0, prev - e.deltaY * 0.001)))
+      spaceHeld.current = true
+      setPanning(true)
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceHeld.current = false
+        panOrigin.current = null
+        setPanning(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
     }
   }, [])
+
+  const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!spaceHeld.current || !scrollRef.current) return
+    e.preventDefault()
+    panOrigin.current = {
+      mx: e.clientX, my: e.clientY,
+      sl: scrollRef.current.scrollLeft,
+      st: scrollRef.current.scrollTop,
+    }
+  }, [])
+
+  const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!panOrigin.current || !scrollRef.current) return
+    const dx = e.clientX - panOrigin.current.mx
+    const dy = e.clientY - panOrigin.current.my
+    scrollRef.current.scrollLeft = panOrigin.current.sl - dx
+    scrollRef.current.scrollTop  = panOrigin.current.st - dy
+  }, [])
+
+  const handleCanvasMouseUp = useCallback(() => {
+    panOrigin.current = null
+  }, [])
+
+  // Zoom with Ctrl/Cmd + scroll — keeps the point under the cursor fixed
+  // Uses a native (non-passive) listener so e.preventDefault() actually works.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      e.preventDefault()
+
+      // Capture mouse + scroll position BEFORE the state update re-renders the DOM
+      const rect = el.getBoundingClientRect()
+      const mouseY = e.clientY - rect.top
+      const mouseX = e.clientX - rect.left
+      const oldScrollTop  = el.scrollTop
+      const oldScrollLeft = el.scrollLeft
+
+      setScale(prev => {
+        const newScale = Math.max(0.25, Math.min(4.0, prev - e.deltaY * 0.001))
+        if (newScale === prev) return prev
+
+        // After React re-renders with new scale, adjust scroll so the pixel under
+        // the cursor stays at the same screen position.
+        const ratio = newScale / prev
+        requestAnimationFrame(() => {
+          if (!scrollRef.current) return
+          scrollRef.current.scrollTop  = (oldScrollTop  + mouseY) * ratio - mouseY
+          scrollRef.current.scrollLeft = (oldScrollLeft + mouseX) * ratio - mouseX
+        })
+
+        return newScale
+      })
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, []) // setScale is stable; scrollRef.current assigned before this runs
 
   const selectedFrame = frames.find(f => f.id === selectedFrameId) || null
 
@@ -914,6 +1239,8 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
             style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }} title="Deshacer (⌘Z)">↩</button>
           <button onClick={redo} className="px-2 py-1 rounded text-xs transition"
             style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }} title="Rehacer (⌘⇧Z)">↪</button>
+          <button onClick={saveCheckpoint} className="px-2 py-1 rounded text-xs transition"
+            style={{ background: 'rgba(255,255,255,0.06)', color: '#a0a0a8' }} title="Guardar punto de control en el historial">⊙</button>
 
           <div className="w-px h-4" style={{ background: 'rgba(255,255,255,0.1)' }} />
 
@@ -956,19 +1283,26 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
             ⬆ DOCX
           </button>
 
-          {/* AI Design */}
+          {/* AI Design — single frame */}
           <button
             onClick={() => setShowAIDesign(v => !v)}
             className="px-2 py-1 rounded text-xs transition"
             style={{ background: showAIDesign ? 'rgba(124,58,237,0.4)' : 'rgba(255,255,255,0.06)', color: showAIDesign ? '#c4b5fd' : '#a0a0a8' }}
-            title="IA Diseño — modifica el marco seleccionado con IA"
-          >✨ IA</button>
+            title="IA Diseño — modifica el marco seleccionado (1 marco)"
+          >✨ Marco</button>
+          {/* AI Layout — full canvas */}
+          <button
+            onClick={() => setShowAILayout(v => !v)}
+            className="px-2 py-1 rounded text-xs transition"
+            style={{ background: showAILayout ? 'rgba(212,82,43,0.4)' : 'rgba(255,255,255,0.06)', color: showAILayout ? '#fb923c' : '#a0a0a8' }}
+            title="IA Layout — modifica toda la maqueta con lenguaje natural (⌘K)"
+          >✨ Layout</button>
 
           {/* Linking / Draw mode hints */}
           {linkingFrom && (
             <div className="px-3 py-1 rounded text-white animate-pulse text-xs" style={{ background: '#4f46e5' }}>
-              Clic en el marco destino →
-              <button onClick={() => setLinkingFrom(null)} className="ml-2 underline">Cancelar</button>
+              Clic en marco existente · o arrastra para crear uno nuevo
+              <button onClick={() => setLinkingFrom(null)} className="ml-2 underline">Esc</button>
             </div>
           )}
           {drawMode !== 'pointer' && !linkingFrom && (
@@ -1046,8 +1380,11 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         <div
           ref={scrollRef}
           className="flex-1 overflow-auto bg-slate-700"
-          onWheel={handleWheel}
-          style={{ paddingTop: 8, paddingBottom: 64 }}
+          onMouseDown={handleCanvasMouseDown}
+          onMouseMove={handleCanvasMouseMove}
+          onMouseUp={handleCanvasMouseUp}
+          onMouseLeave={handleCanvasMouseUp}
+          style={{ paddingTop: 8, paddingBottom: 64, cursor: panning ? (panOrigin.current ? 'grabbing' : 'grab') : undefined }}
         >
           <div className="flex flex-col items-center py-6 min-h-full">
             {Array.from({ length: pageCount }, (_, i) => (
@@ -1075,10 +1412,13 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
                 onAddTableFrame={handleAddTableFrame}
                 onStartLink={handleStartLink}
                 onCompleteLink={handleCompleteLink}
+                onLinkToNewFrame={handleLinkToNewFrame}
                 onDoubleClickGuide={handleDeleteGuide}
                 onContextMenu={handleContextMenu}
                 onAIAction={onAIAction}
                 scale={scale}
+                autoEditFrameId={autoEditFrameId}
+                onAutoEditDone={() => setAutoEditFrameId(null)}
               />
             ))}
           </div>
@@ -1123,7 +1463,18 @@ export function LayoutCanvas({ document, onSave, onAIAction }: Props) {
         historyLabels={historyLabels.current}
         historyCurrentIndex={historyIndex.current}
         onJumpToHistory={handleJumpToHistory}
+        onInsertImage={handleInsertGeneratedImage}
       />
+
+      {/* AI Layout bar — full canvas natural language commands (⌘K) */}
+      {showAILayout && (
+        <AILayoutBar
+          frameCount={frames.length}
+          selectedFrameLabel={selectedFrame ? `"${((selectedFrame as any).ownContent || '').replace(/<[^>]+>/g,'').trim().slice(0,20) || selectedFrame.id}"` : undefined}
+          onExecute={handleAILayout}
+          onClose={() => setShowAILayout(false)}
+        />
+      )}
 
       {/* AI Design floating panel */}
       {showAIDesign && (
